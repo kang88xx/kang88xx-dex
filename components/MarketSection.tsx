@@ -1,0 +1,170 @@
+"use client";
+
+import { useState } from "react";
+import { TOKENS, getToken, type ChartRange } from "@/lib/mock-data";
+import { formatCompact, formatPercent, formatUsd } from "@/lib/format";
+import { TokenLogo } from "@/components/TokenLogo";
+import { PriceChart, Sparkline } from "@/components/PriceChart";
+import { Eyebrow } from "@/components/ui";
+
+export function MarketSection() {
+  const [selected, setSelected] = useState("ETH");
+  const [range, setRange] = useState<ChartRange>("1M");
+  const token = getToken(selected)!;
+
+  return (
+    <div>
+      <Eyebrow dot="cyan" className="mb-4">
+        Market
+      </Eyebrow>
+
+      {/* Chart card */}
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 sm:p-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <TokenLogo symbol={token.symbol} size={40} />
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold">{token.name}</h2>
+                <span className="text-sm text-[var(--muted)]">
+                  {token.symbol}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-2xl font-bold tracking-tight">
+                  {formatUsd(token.priceUsd)}
+                </span>
+                <span
+                  className="text-sm font-medium"
+                  style={{
+                    color: token.change24h >= 0 ? "var(--up)" : "var(--down)",
+                  }}
+                >
+                  {formatPercent(token.change24h)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <PriceChart
+            symbol={selected}
+            range={range}
+            onRangeChange={setRange}
+            height={240}
+          />
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-4 border-t border-[var(--border)] pt-4 sm:grid-cols-4">
+          <Metric
+            label="Market cap"
+            value={formatUsd(token.marketCap, { compact: true })}
+          />
+          <Metric
+            label="24h volume"
+            value={formatUsd(token.volume24h, { compact: true })}
+          />
+          <Metric label="24h change" value={formatPercent(token.change24h)} />
+          <Metric label="Contract" value={`${token.address.slice(0, 8)}…`} mono />
+        </div>
+      </div>
+
+      {/* Token table */}
+      <div className="mt-6 overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)]">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[var(--border)] text-left text-xs text-[var(--muted)]">
+              <th className="px-5 py-3 font-medium">#</th>
+              <th className="px-2 py-3 font-medium">Token</th>
+              <th className="px-2 py-3 text-right font-medium">Price</th>
+              <th className="px-2 py-3 text-right font-medium">24h</th>
+              <th className="hidden px-2 py-3 text-right font-medium sm:table-cell">
+                Volume
+              </th>
+              <th className="hidden px-2 py-3 text-right font-medium md:table-cell">
+                Market cap
+              </th>
+              <th className="hidden px-5 py-3 text-right font-medium sm:table-cell">
+                7d
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {TOKENS.map((t, i) => (
+              <tr
+                key={t.symbol}
+                onClick={() => setSelected(t.symbol)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelected(t.symbol);
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={`View ${t.name} chart`}
+                aria-pressed={selected === t.symbol}
+                className={`cursor-pointer border-b border-[var(--border)] outline-none transition-colors last:border-0 hover:bg-[var(--surface)] focus-visible:bg-[var(--surface)] ${
+                  selected === t.symbol ? "bg-[var(--accent-soft)]" : ""
+                }`}
+              >
+                <td className="px-5 py-3 text-[var(--muted)]">{i + 1}</td>
+                <td className="px-2 py-3">
+                  <div className="flex items-center gap-2.5">
+                    <TokenLogo symbol={t.symbol} size={32} />
+                    <div>
+                      <div className="font-semibold">{t.symbol}</div>
+                      <div className="text-xs text-[var(--muted)]">{t.name}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-2 py-3 text-right font-medium">
+                  {formatUsd(t.priceUsd)}
+                </td>
+                <td
+                  className="px-2 py-3 text-right font-medium"
+                  style={{
+                    color: t.change24h >= 0 ? "var(--up)" : "var(--down)",
+                  }}
+                >
+                  {formatPercent(t.change24h)}
+                </td>
+                <td className="hidden px-2 py-3 text-right text-[var(--muted)] sm:table-cell">
+                  ${formatCompact(t.volume24h)}
+                </td>
+                <td className="hidden px-2 py-3 text-right text-[var(--muted)] md:table-cell">
+                  ${formatCompact(t.marketCap)}
+                </td>
+                <td className="hidden px-5 py-3 sm:table-cell">
+                  <div className="flex justify-end">
+                    <Sparkline symbol={t.symbol} />
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div>
+      <div className="text-xs text-[var(--muted)]">{label}</div>
+      <div className={`mt-0.5 font-semibold ${mono ? "font-mono text-sm" : ""}`}>
+        {value}
+      </div>
+    </div>
+  );
+}

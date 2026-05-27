@@ -1,0 +1,217 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ */
+/*  IOI — Pharos Design System v2                                       */
+/*  Black / off-white paper / Pharos blue. Inter Tight + IBM Plex Mono. */
+/* ------------------------------------------------------------------ */
+
+:root {
+  /* surfaces — paper hosts content, white hosts cards */
+  --background: #f0f0f2; /* paper */
+  --card: #ffffff;
+  --surface: #f4f4f6;
+  --surface-2: #e9e9ed;
+  --border: #e4e4e8;
+  --border-strong: #d6d6dc;
+
+  /* ink */
+  --foreground: #1a1a1a; /* ink */
+  --muted: #6b6b72; /* ink-3 */
+  --muted-2: #9a9aa2; /* ink-4 */
+
+  /* Pharos blue — the single saturated action color */
+  --accent: #1a1aee; /* blue-500 */
+  --accent-hover: #0f0fcc; /* blue-600 */
+  --accent-press: #0a0a99; /* blue-700 */
+  --accent-soft: #e8e8ff; /* blue-50 */
+  --blue-300: #5a5aff;
+
+  /* accent dots — the X-palette (punctuation) */
+  --dot-yellow: #ffe920;
+  --dot-orange: #ff5722;
+  --dot-cyan: #3dbeff;
+  --dot-purple: #5b3fff;
+  --dot-blue: #1a1aee;
+
+  /* market semantics */
+  --up: #16a34a;
+  --up-soft: #e9f8ef;
+  --down: #e5484d;
+  --down-soft: #fdecec;
+
+  --radius: 16px;
+
+  color-scheme: light;
+}
+
+.dark {
+  --background: #08080a; /* near-black */
+  --card: #141418;
+  --surface: #1a1a1f;
+  --surface-2: #24242b;
+  --border: #262630;
+  --border-strong: #383843;
+
+  --foreground: #f4f4f5;
+  --muted: #9a9aa4;
+  --muted-2: #6b6b75;
+
+  --accent: #5a5aff; /* blue-300 reads brighter on dark */
+  --accent-hover: #7170ff;
+  --accent-press: #4a4aee;
+  --accent-soft: #1a1947;
+  --blue-300: #7170ff;
+
+  --dot-yellow: #ffe920;
+  --dot-orange: #ff5722;
+  --dot-cyan: #3dbeff;
+  --dot-purple: #6b54ff;
+  --dot-blue: #5a5aff;
+
+  --up: #2ec07a;
+  --up-soft: #0f2a1d;
+  --down: #f06b6b;
+  --down-soft: #2c1517;
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-card: var(--card);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-2: var(--muted-2);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-dot-yellow: var(--dot-yellow);
+  --color-dot-orange: var(--dot-orange);
+  --color-dot-cyan: var(--dot-cyan);
+  --color-dot-purple: var(--dot-purple);
+  --color-up: var(--up);
+  --color-up-soft: var(--up-soft);
+  --color-down: var(--down);
+  --color-down-soft: var(--down-soft);
+
+  --font-sans: var(--font-inter-tight);
+  --font-mono: var(--font-plex-mono);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+body {
+  font-family: var(--font-inter-tight), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Pharos type: headlines run tight with negative tracking */
+h1 {
+  letter-spacing: -0.035em;
+}
+h2 {
+  letter-spacing: -0.025em;
+}
+h3,
+h4 {
+  letter-spacing: -0.015em;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Eyebrow: IBM Plex Mono, uppercase, wide-tracked chrome label */
+.eyebrow {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.eyebrow .bdot {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  display: inline-block;
+}
+.eyebrow .bdot--yellow {
+  background: var(--dot-yellow);
+}
+.eyebrow .bdot--orange {
+  background: var(--dot-orange);
+}
+.eyebrow .bdot--cyan {
+  background: var(--dot-cyan);
+}
+.eyebrow .bdot--purple {
+  background: var(--dot-purple);
+}
+
+/* Hide number input spinners */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Subtle scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 3px solid var(--background);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-2);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.25s ease-out both;
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+.animate-pulse-soft {
+  animation: pulse-soft 1.8s ease-in-out infinite;
+}
