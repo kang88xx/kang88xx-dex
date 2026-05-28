@@ -51,7 +51,7 @@ export function timeAgo(ts: number): string {
 }
 
 export function timeAgoPure(ts: number, now: number): string {
-  const diff = now - ts;
+  const diff = Math.max(0, now - ts);
   const s = Math.floor(diff / 1000);
   if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);

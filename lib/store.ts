@@ -47,7 +47,6 @@ export const LMS_CONFIG = {
   BOT_TICK_MS: 10_000,
   BOT_PROBABILITY: 0.6,
   MAX_BOT_BETS: 5,
-  PENDING_CLAIMS_CAP: 50,
   HISTORY_CAP: 20,
 };
 
@@ -71,11 +70,11 @@ function uid(prefix = ""): string {
   return prefix + Math.random().toString(36).slice(2, 10);
 }
 
-function makeFreshRound(): LmsRound {
+function makeFreshRound(now: number): LmsRound {
   return {
     id: uid("round_"),
     status: "active",
-    endsAt: Date.now() + 60_000,
+    endsAt: now + 60_000,
     prizePool: 0,
     treasuryPool: 0,
     burnedPool: 0,
@@ -132,7 +131,7 @@ function finalizeRoundIfExpired(
 
   // Empty round — no winner, just start fresh
   if (!round.lastBettor) {
-    return { round: makeFreshRound(), history, pendingClaims };
+    return { round: makeFreshRound(now), history, pendingClaims };
   }
 
   const isBot = PHANTOM_BOTS.includes(round.lastBettor);
@@ -153,12 +152,12 @@ function finalizeRoundIfExpired(
       amount: round.prizePool,
       createdAt: now,
     };
-    newPendingClaims = [claim, ...pendingClaims].slice(0, LMS_CONFIG.PENDING_CLAIMS_CAP);
+    newPendingClaims = [claim, ...pendingClaims];
   }
 
   const newHistory = [historyEntry, ...history].slice(0, LMS_CONFIG.HISTORY_CAP);
 
-  return { round: makeFreshRound(), history: newHistory, pendingClaims: newPendingClaims };
+  return { round: makeFreshRound(now), history: newHistory, pendingClaims: newPendingClaims };
 }
 
 interface DexState {
@@ -244,7 +243,7 @@ export const useDexStore = create<DexState>()(
       transactions: [],
       campaigns: seedCampaigns(),
       lms: {
-        round: makeFreshRound(),
+        round: makeFreshRound(Date.now()),
         history: [],
         pendingClaims: [],
       },
@@ -450,7 +449,7 @@ export const useDexStore = create<DexState>()(
         const { lms } = get();
         const now = Date.now();
         if (!lms.round) {
-          set((s) => ({ lms: { ...s.lms, round: makeFreshRound() } }));
+          set((s) => ({ lms: { ...s.lms, round: makeFreshRound(now) } }));
           return;
         }
         const result = finalizeRoundIfExpired(
@@ -556,8 +555,21 @@ export const useDexStore = create<DexState>()(
 
       lmsBotTick: () => {
         const { lms } = get();
-        if (lms.round.status !== "active") return;
         const now = Date.now();
+
+        // Finalize expired round before bot logic
+        const finalized = finalizeRoundIfExpired(
+          lms.round,
+          lms.history,
+          lms.pendingClaims,
+          now,
+        );
+        if (finalized) {
+          set((s) => ({ lms: { ...s.lms, ...finalized } }));
+          return;
+        }
+
+        if (lms.round.status !== "active") return;
         const remaining = lms.round.endsAt - now;
         if (remaining <= 5_000) return;
         if (lms.round.botBetCount >= LMS_CONFIG.MAX_BOT_BETS) return;

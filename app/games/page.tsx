@@ -35,10 +35,14 @@ export default function GamesPage() {
   // nowMs drives both the countdown display and timeAgoPure calls — pure render
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [justBetIdx, setJustBetIdx] = useState<number | null>(null);
+  const [srAnnounce, setSrAnnounce] = useState("");
 
   const botTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const highlightRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const announcedExpiryRef = useRef(false);
+  const prevClaimCountRef = useRef(0);
+  const prevRoundIdRef = useRef<string | null>(null);
 
   // On mount: ensure a round exists, handle stale persisted rounds
   useEffect(() => {
@@ -106,6 +110,31 @@ export default function GamesPage() {
         : [],
     [lms.pendingClaims, address],
   );
+
+  // Sparse screen-reader announcements — fires as side-effects of state changes
+  useEffect(() => {
+    // Reset expiry announcement flag when round changes
+    if (prevRoundIdRef.current !== round.id) {
+      prevRoundIdRef.current = round.id;
+      announcedExpiryRef.current = false;
+      setSrAnnounce("New round started");
+    }
+  }, [round.id]);
+
+  useEffect(() => {
+    if (!announcedExpiryRef.current && remainingMs > 0 && remainingMs < 10_000) {
+      announcedExpiryRef.current = true;
+      setSrAnnounce("Round about to expire");
+    }
+  }, [remainingMs]);
+
+  useEffect(() => {
+    const currentCount = myClaims.length;
+    if (currentCount > prevClaimCountRef.current) {
+      setSrAnnounce("You won the round. Claim available.");
+    }
+    prevClaimCountRef.current = currentCount;
+  }, [myClaims.length]);
 
   const handlePlaceBet = () => {
     if (!canBet) return;
@@ -177,13 +206,17 @@ export default function GamesPage() {
         </span>
 
         <div
-          aria-live="polite"
           className="font-mono text-7xl sm:text-8xl font-bold tabular-nums leading-none mb-4 transition-transform"
           style={{
             color: remainingMs < 10_000 ? "var(--down)" : "var(--foreground)",
           }}
         >
           {mmss(remainingMs)}
+        </div>
+
+        {/* Sparse screen-reader announcer — only fires on meaningful events */}
+        <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+          {srAnnounce}
         </div>
 
         {/* Last bettor */}
@@ -265,6 +298,7 @@ export default function GamesPage() {
                       </span>
                       <button
                         onClick={() => handleClaim(claim.id)}
+                        aria-label={`Claim ${claim.amount.toFixed(2)} USDT from round ${claim.roundId.slice(-4)}`}
                         className="rounded-xl bg-[var(--up)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:opacity-90"
                       >
                         Claim
