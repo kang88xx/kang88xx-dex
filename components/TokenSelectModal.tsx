@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { TOKENS } from "@/lib/mock-data";
 import { useBalances } from "@/lib/store";
@@ -20,14 +20,52 @@ export function TokenSelectModal({
 }) {
   const [query, setQuery] = useState("");
   const balances = useBalances();
+  const panelRef = useRef<HTMLDivElement>(null);
 
+  // Focus trap: keep keyboard focus inside the dialog while it is open,
+  // cycle Tab/Shift+Tab within it, and restore focus to the trigger on close.
   useEffect(() => {
     if (!open) return;
+    const panel = panelRef.current;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+
+    const focusable = () =>
+      panel
+        ? Array.from(
+            panel.querySelectorAll<HTMLElement>(
+              'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ),
+          ).filter((el) => el.offsetParent !== null)
+        : [];
+
+    // move focus into the dialog (prefer the search field)
+    const searchInput = panel?.querySelector<HTMLInputElement>("input");
+    (searchInput ?? focusable()[0])?.focus();
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const els = focusable();
+      if (els.length === 0) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
+
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previouslyFocused?.focus?.();
+    };
   }, [open, onClose]);
 
   if (!open) return null;
@@ -48,6 +86,7 @@ export function TokenSelectModal({
         aria-hidden
       />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Select a token"
@@ -67,7 +106,6 @@ export function TokenSelectModal({
           <div className="flex items-center gap-2 rounded-2xl border border-[var(--border-strong)] px-3.5 py-2.5">
             <Search className="h-4 w-4 text-[var(--muted)]" />
             <input
-              autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search name or symbol"

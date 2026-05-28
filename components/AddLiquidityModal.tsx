@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Plus } from "lucide-react";
 import { POOL_MAP, TOKEN_MAP } from "@/lib/mock-data";
 import { useBalances, useDexStore, useHydrated } from "@/lib/store";
@@ -21,6 +21,53 @@ export function AddLiquidityModal({
   const addLiquidity = useDexStore((s) => s.addLiquidity);
   const balances = useBalances();
   const [amount, setAmount] = useState("");
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Focus trap: keep keyboard focus inside the dialog while it is open,
+  // cycle Tab/Shift+Tab within it, and restore focus to the trigger on close.
+  useEffect(() => {
+    if (!poolId) return;
+    const panel = panelRef.current;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+
+    const focusable = () =>
+      panel
+        ? Array.from(
+            panel.querySelectorAll<HTMLElement>(
+              'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ),
+          ).filter((el) => el.offsetParent !== null)
+        : [];
+
+    // move focus into the dialog (prefer the amount field)
+    const amountInput = panel?.querySelector<HTMLInputElement>("input");
+    (amountInput ?? focusable()[0])?.focus();
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const els = focusable();
+      if (els.length === 0) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previouslyFocused?.focus?.();
+    };
+  }, [poolId, onClose]);
 
   if (!poolId) return null;
   const pool = POOL_MAP[poolId];
@@ -51,7 +98,13 @@ export function AddLiquidityModal({
   return (
     <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 p-4 pt-24">
       <div className="absolute inset-0" onClick={onClose} aria-hidden />
-      <div className="animate-fade-in relative w-full max-w-md rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-2xl">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Add liquidity to ${pool.token0} / ${pool.token1}`}
+        className="animate-fade-in relative w-full max-w-md rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-2xl"
+      >
         <div className="flex items-center justify-between p-5">
           <div className="flex items-center gap-2">
             <TokenLogo symbol={pool.token0} size={28} />
@@ -81,7 +134,6 @@ export function AddLiquidityModal({
               <input
                 type="number"
                 inputMode="decimal"
-                autoFocus
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0"
