@@ -23,7 +23,9 @@ export default function GamesPage() {
   const connected = useDexStore((s) => s.connected);
   const address = useDexStore((s) => s.address);
   const connectWallet = useDexStore((s) => s.connectWallet);
-  const lms = useDexStore((s) => s.lms);
+  const round = useDexStore((s) => s.lms.round);
+  const history = useDexStore((s) => s.lms.history);
+  const pendingClaims = useDexStore((s) => s.lms.pendingClaims);
   const lmsEnsureRound = useDexStore((s) => s.lmsEnsureRound);
   const lmsPlaceBet = useDexStore((s) => s.lmsPlaceBet);
   const lmsCheckExpiry = useDexStore((s) => s.lmsCheckExpiry);
@@ -35,7 +37,7 @@ export default function GamesPage() {
   // nowMs drives both the countdown display and timeAgoPure calls — pure render
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [justBetIdx, setJustBetIdx] = useState<number | null>(null);
-  const [srAnnounce, setSrAnnounce] = useState("");
+  const [srAnnounce, setSrAnnounce] = useState<{ id: number; message: string } | null>(null);
 
   const botTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -43,6 +45,7 @@ export default function GamesPage() {
   const announcedExpiryRef = useRef(false);
   const prevClaimCountRef = useRef(0);
   const prevRoundIdRef = useRef<string | null>(null);
+  const prevRemainingRef = useRef<number>(Infinity);
 
   // On mount: ensure a round exists, handle stale persisted rounds
   useEffect(() => {
@@ -79,8 +82,6 @@ export default function GamesPage() {
 
   const parsedAmt = parseFloat(amount);
   const betAmt = Number.isFinite(parsedAmt) ? parsedAmt : 0;
-  const round = lms.round;
-  const history = lms.history;
   const isActive = round.status === "active";
   const overBalance = hydrated && connected && betAmt > usdt;
   const canBet =
@@ -106,32 +107,39 @@ export default function GamesPage() {
   const myClaims = useMemo(
     () =>
       address
-        ? (lms.pendingClaims ?? []).filter((c) => c.address === address)
+        ? (pendingClaims ?? []).filter((c) => c.address === address)
         : [],
-    [lms.pendingClaims, address],
+    [pendingClaims, address],
   );
 
   // Sparse screen-reader announcements — fires as side-effects of state changes
   useEffect(() => {
-    // Reset expiry announcement flag when round changes
+    // Reset expiry announcement flag and prevRemainingRef when round changes
     if (prevRoundIdRef.current !== round.id) {
       prevRoundIdRef.current = round.id;
       announcedExpiryRef.current = false;
-      setSrAnnounce("New round started");
+      prevRemainingRef.current = Infinity;
+      setSrAnnounce({ id: Date.now(), message: "New round started" });
     }
   }, [round.id]);
 
   useEffect(() => {
-    if (!announcedExpiryRef.current && remainingMs > 0 && remainingMs < 10_000) {
+    if (
+      prevRemainingRef.current >= 10_000 &&
+      remainingMs < 10_000 &&
+      remainingMs > 0 &&
+      !announcedExpiryRef.current
+    ) {
+      setSrAnnounce({ id: Date.now(), message: "Round about to expire" });
       announcedExpiryRef.current = true;
-      setSrAnnounce("Round about to expire");
     }
+    prevRemainingRef.current = remainingMs;
   }, [remainingMs]);
 
   useEffect(() => {
     const currentCount = myClaims.length;
     if (currentCount > prevClaimCountRef.current) {
-      setSrAnnounce("You won the round. Claim available.");
+      setSrAnnounce({ id: Date.now(), message: "You won the round. Claim available." });
     }
     prevClaimCountRef.current = currentCount;
   }, [myClaims.length]);
@@ -216,7 +224,7 @@ export default function GamesPage() {
 
         {/* Sparse screen-reader announcer — only fires on meaningful events */}
         <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-          {srAnnounce}
+          {srAnnounce?.message}
         </div>
 
         {/* Last bettor */}

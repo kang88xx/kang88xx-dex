@@ -50,6 +50,11 @@ export const LMS_CONFIG = {
   HISTORY_CAP: 20,
 };
 
+/** Quantize to 6 decimal places — matches USDT on-chain precision */
+function quant6(n: number): number {
+  return Math.round(n * 1_000_000) / 1_000_000;
+}
+
 const PHANTOM_BOTS: string[] = [
   "0xdeadbeef00000000000000000000000000000001",
   "0xdeadbeef00000000000000000000000000000002",
@@ -89,9 +94,9 @@ function applyBetToRound(
   bettor: string,
   amount: number,
 ): LmsRound {
-  const prize = amount * LMS_CONFIG.FEE_PRIZE;
-  const treasury = amount * LMS_CONFIG.FEE_TREASURY;
-  const burn = amount - prize - treasury;
+  const prize = quant6(amount * LMS_CONFIG.FEE_PRIZE);
+  const treasury = quant6(amount * LMS_CONFIG.FEE_TREASURY);
+  const burn = quant6(amount - prize - treasury);
 
   const now = Date.now();
   const newBet: LmsBet = {
@@ -111,9 +116,9 @@ function applyBetToRound(
 
   return {
     ...round,
-    prizePool: round.prizePool + prize,
-    treasuryPool: round.treasuryPool + treasury,
-    burnedPool: round.burnedPool + burn,
+    prizePool: quant6(round.prizePool + prize),
+    treasuryPool: quant6(round.treasuryPool + treasury),
+    burnedPool: quant6(round.burnedPool + burn),
     lastBettor: bettor,
     endsAt: newEndsAt,
     bets: [newBet, ...round.bets],
@@ -463,10 +468,11 @@ export const useDexStore = create<DexState>()(
         }
       },
 
-      lmsPlaceBet: (amount) => {
+      lmsPlaceBet: (amountIn) => {
         const { address, balances, lms } = get();
         if (!address) return { ok: false, error: "Connect your wallet first" };
-        if (!Number.isFinite(amount)) return { ok: false, error: "Invalid amount" };
+        if (!Number.isFinite(amountIn)) return { ok: false, error: "Invalid amount" };
+        const amount = quant6(amountIn);
         if (!amount || amount < LMS_CONFIG.MIN_BET)
           return {
             ok: false,
@@ -535,7 +541,7 @@ export const useDexStore = create<DexState>()(
 
         set((s) => {
           const a = { ...(s.balances[address] ?? {}) };
-          a.USDT = (a.USDT ?? 0) + payout;
+          a.USDT = quant6((a.USDT ?? 0) + payout);
           return {
             balances: { ...s.balances, [address]: a },
             lms: {
@@ -582,7 +588,7 @@ export const useDexStore = create<DexState>()(
 
         const botAddr =
           PHANTOM_BOTS[Math.floor(Math.random() * PHANTOM_BOTS.length)];
-        const betAmount = Math.floor(Math.random() * 5) + 1; // 1-5 USDT
+        const betAmount = quant6(Math.floor(Math.random() * 5) + 1); // 1-5 USDT
 
         const updatedRound = applyBetToRound(lms.round, botAddr, betAmount);
 
