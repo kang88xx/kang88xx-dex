@@ -9,6 +9,7 @@ import type {
   LmsBet,
   LmsRound,
   LmsHistoryEntry,
+  LmsPendingClaim,
   Transaction,
 } from "./types";
 import {
@@ -35,13 +36,20 @@ const DEFAULT_BALANCES: Record<string, number> = {
 
 const SWAP_FEE = 0.003; // 0.3%
 
-// ─── Last Man Standing constants ─────────────────────────────────────────────
-const LMS_MIN_BET = 1;
-const LMS_BET_ADDS_MS = 30_000;
-const LMS_MAX_REMAINING_MS = 120_000;
-const LMS_FEE_PRIZE = 0.8;
-const LMS_FEE_TREASURY = 0.15;
-// LMS_FEE_BURN = 0.05 (remainder)
+// ─── Last Man Standing config (exported so UI can import) ────────────────────
+export const LMS_CONFIG = {
+  MIN_BET: 1,
+  BET_ADDS_MS: 30_000,
+  MAX_REMAINING_MS: 120_000,
+  FEE_PRIZE: 0.8,
+  FEE_TREASURY: 0.15,
+  FEE_BURN: 0.05,
+  BOT_TICK_MS: 10_000,
+  BOT_PROBABILITY: 0.6,
+  MAX_BOT_BETS: 5,
+  PENDING_CLAIMS_CAP: 50,
+  HISTORY_CAP: 20,
+};
 
 const PHANTOM_BOTS: string[] = [
   "0xdeadbeef00000000000000000000000000000001",
@@ -82,8 +90,8 @@ function applyBetToRound(
   bettor: string,
   amount: number,
 ): LmsRound {
-  const prize = amount * LMS_FEE_PRIZE;
-  const treasury = amount * LMS_FEE_TREASURY;
+  const prize = amount * LMS_CONFIG.FEE_PRIZE;
+  const treasury = amount * LMS_CONFIG.FEE_TREASURY;
   const burn = amount - prize - treasury;
 
   const now = Date.now();
@@ -97,8 +105,8 @@ function applyBetToRound(
 
   const currentRemaining = round.endsAt - now;
   const newRemaining = Math.min(
-    currentRemaining + LMS_BET_ADDS_MS,
-    LMS_MAX_REMAINING_MS,
+    currentRemaining + LMS_CONFIG.BET_ADDS_MS,
+    LMS_CONFIG.MAX_REMAINING_MS,
   );
   const newEndsAt = now + newRemaining;
 
@@ -111,6 +119,46 @@ function applyBetToRound(
     endsAt: newEndsAt,
     bets: [newBet, ...round.bets],
   };
+}
+
+// ─── Pure round-finalization helper ──────────────────────────────────────────
+function finalizeRoundIfExpired(
+  round: LmsRound,
+  history: LmsHistoryEntry[],
+  pendingClaims: LmsPendingClaim[],
+  now: number,
+): { round: LmsRound; history: LmsHistoryEntry[]; pendingClaims: LmsPendingClaim[] } | null {
+  if (round.endsAt > now) return null;
+
+  // Empty round — no winner, just start fresh
+  if (!round.lastBettor) {
+    return { round: makeFreshRound(), history, pendingClaims };
+  }
+
+  const isBot = PHANTOM_BOTS.includes(round.lastBettor);
+  const historyEntry: LmsHistoryEntry = {
+    roundId: round.id,
+    winner: round.lastBettor,
+    prize: round.prizePool,
+    endedAt: round.endsAt,
+    isBot,
+  };
+
+  let newPendingClaims = pendingClaims;
+  if (!isBot) {
+    const claim: LmsPendingClaim = {
+      id: uid("claim_"),
+      roundId: round.id,
+      address: round.lastBettor,
+      amount: round.prizePool,
+      createdAt: now,
+    };
+    newPendingClaims = [claim, ...pendingClaims].slice(0, LMS_CONFIG.PENDING_CLAIMS_CAP);
+  }
+
+  const newHistory = [historyEntry, ...history].slice(0, LMS_CONFIG.HISTORY_CAP);
+
+  return { round: makeFreshRound(), history: newHistory, pendingClaims: newPendingClaims };
 }
 
 interface DexState {
@@ -131,6 +179,7 @@ interface DexState {
   lms: {
     round: LmsRound;
     history: LmsHistoryEntry[];
+    pendingClaims: LmsPendingClaim[];
   };
 
   // wallet actions
@@ -158,7 +207,7 @@ interface DexState {
   lmsEnsureRound: () => void;
   lmsPlaceBet: (amount: number) => { ok: boolean; error?: string };
   lmsCheckExpiry: () => void;
-  lmsClaim: () => { ok: boolean; error?: string; payout?: number };
+  lmsClaim: (claimId: string) => { ok: boolean; error?: string; payout?: number };
   lmsBotTick: () => void;
 
   // admin
@@ -197,6 +246,7 @@ export const useDexStore = create<DexState>()(
       lms: {
         round: makeFreshRound(),
         history: [],
+        pendingClaims: [],
       },
 
       connectWallet: () => {
@@ -399,39 +449,46 @@ export const useDexStore = create<DexState>()(
       lmsEnsureRound: () => {
         const { lms } = get();
         const now = Date.now();
-        // If stored round is expired (endsAt far in the past) and still active,
-        // expire it. If no round exists at all, create one.
         if (!lms.round) {
           set((s) => ({ lms: { ...s.lms, round: makeFreshRound() } }));
           return;
         }
-        if (lms.round.status === "active" && now > lms.round.endsAt) {
-          const winner = lms.round.lastBettor;
-          const historyEntry: LmsHistoryEntry = {
-            roundId: lms.round.id,
-            winner,
-            prize: lms.round.prizePool,
-            endedAt: lms.round.endsAt,
-          };
-          set((s) => ({
-            lms: {
-              round: { ...s.lms.round, status: "ended" },
-              history: [historyEntry, ...s.lms.history].slice(0, 20),
-            },
-          }));
+        const result = finalizeRoundIfExpired(
+          lms.round,
+          lms.history,
+          lms.pendingClaims,
+          now,
+        );
+        if (result) {
+          set((s) => ({ lms: { ...s.lms, ...result } }));
         }
       },
 
       lmsPlaceBet: (amount) => {
         const { address, balances, lms } = get();
         if (!address) return { ok: false, error: "Connect your wallet first" };
-        if (!amount || amount < LMS_MIN_BET)
+        if (!Number.isFinite(amount)) return { ok: false, error: "Invalid amount" };
+        if (!amount || amount < LMS_CONFIG.MIN_BET)
           return {
             ok: false,
-            error: `Minimum bet is ${LMS_MIN_BET} USDT`,
+            error: `Minimum bet is ${LMS_CONFIG.MIN_BET} USDT`,
           };
         const usdt = balances[address]?.USDT ?? 0;
         if (amount > usdt) return { ok: false, error: "Insufficient USDT" };
+
+        const now = Date.now();
+        // Finalize if expired before applying bet
+        const expiredResult = finalizeRoundIfExpired(
+          lms.round,
+          lms.history,
+          lms.pendingClaims,
+          now,
+        );
+        if (expiredResult) {
+          set((s) => ({ lms: { ...s.lms, ...expiredResult } }));
+          return { ok: false, error: "Round just ended — new round started" };
+        }
+
         if (lms.round.status !== "active")
           return { ok: false, error: "Round is not active" };
 
@@ -456,37 +513,26 @@ export const useDexStore = create<DexState>()(
 
       lmsCheckExpiry: () => {
         const { lms } = get();
-        if (lms.round.status !== "active") return;
         const now = Date.now();
-        if (now <= lms.round.endsAt) return;
-
-        const winner = lms.round.lastBettor;
-        // If no bets at all, start a fresh round immediately
-        if (!winner) {
-          set((s) => ({ lms: { ...s.lms, round: makeFreshRound() } }));
-          return;
+        const result = finalizeRoundIfExpired(
+          lms.round,
+          lms.history,
+          lms.pendingClaims,
+          now,
+        );
+        if (result) {
+          set((s) => ({ lms: { ...s.lms, ...result } }));
         }
-        // Otherwise mark ended so winner can claim
-        set((s) => ({
-          lms: { ...s.lms, round: { ...s.lms.round, status: "ended" } },
-        }));
       },
 
-      lmsClaim: () => {
+      lmsClaim: (claimId: string) => {
         const { address, lms } = get();
         if (!address) return { ok: false, error: "Connect your wallet first" };
-        if (lms.round.status !== "ended")
-          return { ok: false, error: "Round not ended yet" };
-        if (lms.round.lastBettor !== address)
-          return { ok: false, error: "You are not the winner" };
+        const claim = lms.pendingClaims.find((c) => c.id === claimId);
+        if (!claim) return { ok: false, error: "Claim not found" };
+        if (claim.address !== address) return { ok: false, error: "You are not the winner" };
 
-        const payout = lms.round.prizePool;
-        const historyEntry: LmsHistoryEntry = {
-          roundId: lms.round.id,
-          winner: address,
-          prize: payout,
-          endedAt: Date.now(),
-        };
+        const payout = claim.amount;
 
         set((s) => {
           const a = { ...(s.balances[address] ?? {}) };
@@ -494,13 +540,13 @@ export const useDexStore = create<DexState>()(
           return {
             balances: { ...s.balances, [address]: a },
             lms: {
-              round: makeFreshRound(),
-              history: [historyEntry, ...s.lms.history].slice(0, 20),
+              ...s.lms,
+              pendingClaims: s.lms.pendingClaims.filter((c) => c.id !== claimId),
             },
             transactions: pushTx(
               s.transactions,
-              "bet",
-              `Claimed ${payout.toFixed(2)} USDT from round #${lms.round.id}`,
+              "claim",
+              `Claimed ${payout.toFixed(2)} USDT from round #${claim.roundId}`,
               address,
             ),
           };
@@ -514,13 +560,13 @@ export const useDexStore = create<DexState>()(
         const now = Date.now();
         const remaining = lms.round.endsAt - now;
         if (remaining <= 5_000) return;
-        if (lms.round.botBetCount >= 5) return;
+        if (lms.round.botBetCount >= LMS_CONFIG.MAX_BOT_BETS) return;
 
         // Check last bet time (skip if a bet was placed within the last 5s)
         const lastBet = lms.round.bets[0];
         if (lastBet && now - lastBet.timestamp < 5_000) return;
 
-        if (Math.random() >= 0.6) return;
+        if (Math.random() >= LMS_CONFIG.BOT_PROBABILITY) return;
 
         const botAddr =
           PHANTOM_BOTS[Math.floor(Math.random() * PHANTOM_BOTS.length)];
@@ -590,8 +636,9 @@ export const useDexStore = create<DexState>()(
     {
       // bumped from helix-dex-store → reseeds with IOI tokens/campaigns
       // v3: replaced Coin Flip with Last Man Standing
+      // v4: unified round finalization, pendingClaims, LMS_CONFIG export
       name: "ioi-dex-store",
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => localStorage),
     },
   ),

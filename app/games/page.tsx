@@ -1,15 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Coins, Trophy, Clock, Flame, Users, TrendingUp } from "lucide-react";
-import { useDexStore, useHydrated, useBalance } from "@/lib/store";
-import { formatNumber, shortAddress, timeAgo } from "@/lib/format";
+import { useDexStore, useHydrated, useBalance, LMS_CONFIG } from "@/lib/store";
+import { formatNumber, shortAddress, timeAgoPure } from "@/lib/format";
 import { toast } from "@/components/toast";
 import { Eyebrow } from "@/components/ui";
 import { TokenLogo } from "@/components/TokenLogo";
 
 const USDT_BSC_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
-const LMS_MIN_BET = 1;
 const QUICK_CHIPS = [1, 5, 10, 50];
 
 function mmss(ms: number): string {
@@ -33,8 +32,8 @@ export default function GamesPage() {
   const usdt = useBalance("USDT");
 
   const [amount, setAmount] = useState("5");
-  // Local remaining-ms state driven by interval — never calls Date.now() in render
-  const [remainingMs, setRemainingMs] = useState(60_000);
+  // nowMs drives both the countdown display and timeAgoPure calls — pure render
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [justBetIdx, setJustBetIdx] = useState<number | null>(null);
 
   const botTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -46,30 +45,22 @@ export default function GamesPage() {
     lmsEnsureRound();
   }, [lmsEnsureRound]);
 
-  // 1-second countdown + expiry check
-  // Initial remainingMs is derived from endsAt in the useSyncExternalStore
-  // snapshot — we update it inside the setInterval callback only (not
-  // directly in the effect body) to satisfy the react-hooks/set-state-in-effect
-  // lint rule. The first tick fires within 1s so the display is always fresh.
+  // 1-second ticker — updates nowMs, which drives remainingMs and timeAgoPure in render
   useEffect(() => {
     countdownRef.current = setInterval(() => {
       lmsCheckExpiry();
-      setRemainingMs((prev) => {
-        const next = Math.max(0, lms.round.endsAt - Date.now());
-        // Only update if value changed to avoid unnecessary re-renders
-        return prev === next ? prev : next;
-      });
+      setNowMs(Date.now());
     }, 1000);
     return () => {
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
-  }, [lms.round.endsAt, lms.round.id, lmsCheckExpiry]);
+  }, [lmsCheckExpiry]);
 
   // Bot tick every ~10s
   useEffect(() => {
     botTickRef.current = setInterval(() => {
       lmsBotTick();
-    }, 10_000);
+    }, LMS_CONFIG.BOT_TICK_MS);
     return () => {
       if (botTickRef.current) clearInterval(botTickRef.current);
     };
@@ -82,23 +73,39 @@ export default function GamesPage() {
     };
   }, []);
 
-  const betAmt = parseFloat(amount) || 0;
+  const parsedAmt = parseFloat(amount);
+  const betAmt = Number.isFinite(parsedAmt) ? parsedAmt : 0;
   const round = lms.round;
   const history = lms.history;
   const isActive = round.status === "active";
-  const isEnded = round.status === "ended";
-  const isWinner = isEnded && round.lastBettor === address;
   const overBalance = hydrated && connected && betAmt > usdt;
   const canBet =
     hydrated &&
     connected &&
-    betAmt >= LMS_MIN_BET &&
+    betAmt >= LMS_CONFIG.MIN_BET &&
     !overBalance &&
     isActive;
 
-  // Unique players this round
-  const uniquePlayers = new Set(round.bets.map((b) => b.address)).size;
-  const previewPrize = round.prizePool + betAmt * 0.8;
+  // Pure derivations — no Date.now() in render
+  const remainingMs = Math.max(0, round.endsAt - nowMs);
+
+  // Memoized unique player count keyed on bets array reference
+  const uniquePlayers = useMemo(
+    () => new Set(round.bets.map((b) => b.address)).size,
+    [round.bets],
+  );
+
+  const previewPrize =
+    betAmt > 0 ? round.prizePool + betAmt * LMS_CONFIG.FEE_PRIZE : 0;
+
+  // Pending claims for this address
+  const myClaims = useMemo(
+    () =>
+      address
+        ? (lms.pendingClaims ?? []).filter((c) => c.address === address)
+        : [],
+    [lms.pendingClaims, address],
+  );
 
   const handlePlaceBet = () => {
     if (!canBet) return;
@@ -113,8 +120,8 @@ export default function GamesPage() {
     highlightRef.current = setTimeout(() => setJustBetIdx(null), 1200);
   };
 
-  const handleClaim = () => {
-    const res = lmsClaim();
+  const handleClaim = (claimId: string) => {
+    const res = lmsClaim(claimId);
     if (!res.ok) {
       toast.error(res.error ?? "Claim failed");
       return;
@@ -170,6 +177,7 @@ export default function GamesPage() {
         </span>
 
         <div
+          aria-live="polite"
           className="font-mono text-7xl sm:text-8xl font-bold tabular-nums leading-none mb-4 transition-transform"
           style={{
             color: remainingMs < 10_000 ? "var(--down)" : "var(--foreground)",
@@ -179,7 +187,7 @@ export default function GamesPage() {
         </div>
 
         {/* Last bettor */}
-        <div className="text-sm text-[var(--muted)] mb-5">
+        <div className="text-sm text-[var(--muted)]">
           {round.lastBettor ? (
             <>
               Last bettor:{" "}
@@ -196,40 +204,6 @@ export default function GamesPage() {
             <span>No bets yet</span>
           )}
         </div>
-
-        {/* Outcome states */}
-        {isEnded && (
-          <div className="w-full max-w-sm">
-            {isWinner ? (
-              <div className="flex flex-col items-center gap-3">
-                <div className="flex items-center gap-2 text-lg font-bold text-[var(--up)]">
-                  <Trophy className="h-5 w-5" />
-                  You won the round!
-                </div>
-                <p className="text-sm text-[var(--muted)]">
-                  Prize: {formatNumber(round.prizePool, 2)} USDT
-                </p>
-                <button
-                  onClick={handleClaim}
-                  className="mt-1 h-12 w-full rounded-2xl bg-[var(--up)] font-semibold text-white animate-pulse-soft transition-colors hover:opacity-90"
-                >
-                  Claim {formatNumber(round.prizePool, 2)} USDT
-                </button>
-              </div>
-            ) : round.lastBettor ? (
-              <div className="rounded-2xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">
-                Round ended · winner{" "}
-                <span className="font-mono font-semibold text-[var(--foreground)]">
-                  {shortAddress(round.lastBettor)}
-                </span>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">
-                Round expired with no bets · starting next round
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Stats row */}
@@ -262,8 +236,46 @@ export default function GamesPage() {
       </div>
 
       <div className="grid gap-5 md:grid-cols-[1fr_340px]">
-        {/* Left column: bet card + fee bar */}
+        {/* Left column: claims card + bet card + fee bar */}
         <div className="flex flex-col gap-5">
+          {/* Your Claims card — only rendered when there are pending claims */}
+          {myClaims.length > 0 && (
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 sm:p-7 shadow-2xl">
+              <div className="flex items-center gap-2 mb-4">
+                <Trophy className="h-4 w-4 text-[var(--up)]" />
+                <h2 className="text-base font-semibold">Your Claims</h2>
+              </div>
+              <div className="space-y-2">
+                {myClaims.map((claim) => (
+                  <div
+                    key={claim.id}
+                    className="flex items-center justify-between rounded-2xl bg-[var(--surface)] px-4 py-3 text-sm"
+                  >
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-mono text-xs text-[var(--muted-2)]">
+                        Round #{claim.roundId.slice(-4)}
+                      </span>
+                      <span className="font-semibold">
+                        {claim.amount.toFixed(2)} USDT
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-[var(--muted)]">
+                        {timeAgoPure(claim.createdAt, nowMs)}
+                      </span>
+                      <button
+                        onClick={() => handleClaim(claim.id)}
+                        className="rounded-xl bg-[var(--up)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:opacity-90"
+                      >
+                        Claim
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Place Your Bet card */}
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 sm:p-7 shadow-2xl">
             <h2 className="text-base font-semibold mb-4">Place Your Bet</h2>
@@ -271,7 +283,7 @@ export default function GamesPage() {
             {/* Amount input */}
             <div className="rounded-2xl bg-[var(--surface)] p-4">
               <div className="flex items-center justify-between text-xs text-[var(--muted)]">
-                <span>Bet amount</span>
+                <label htmlFor="lms-bet-amount">Bet amount</label>
                 <span>
                   Balance:{" "}
                   <span
@@ -285,11 +297,12 @@ export default function GamesPage() {
               </div>
               <div className="mt-1 flex items-center">
                 <input
+                  id="lms-bet-amount"
                   type="number"
                   inputMode="decimal"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  min={LMS_MIN_BET}
+                  min={LMS_CONFIG.MIN_BET}
                   placeholder="0"
                   className="w-full bg-transparent text-2xl font-semibold outline-none placeholder:text-[var(--muted-2)]"
                 />
@@ -353,8 +366,8 @@ export default function GamesPage() {
                     ? "Round ended"
                     : overBalance
                       ? "Insufficient USDT"
-                      : betAmt < LMS_MIN_BET
-                        ? `Minimum ${LMS_MIN_BET} USDT`
+                      : betAmt < LMS_CONFIG.MIN_BET
+                        ? `Minimum ${LMS_CONFIG.MIN_BET} USDT`
                         : `Place Your Bet · ${betAmt.toFixed(2)} USDT`}
                 </button>
               )}
@@ -446,7 +459,7 @@ export default function GamesPage() {
                     }}
                   >
                     <span className="text-[var(--muted)]">
-                      {timeAgo(bet.timestamp)}
+                      {timeAgoPure(bet.timestamp, nowMs)}
                     </span>
                     <span className="font-mono">
                       {shortAddress(bet.address)}
@@ -491,14 +504,19 @@ export default function GamesPage() {
                     <span className="font-mono text-[var(--muted-2)] text-[10px]">
                       #{h.roundId.slice(-4)}
                     </span>
-                    <span className="font-mono truncate">
+                    <span className="font-mono truncate flex items-center gap-1">
                       {h.winner ? shortAddress(h.winner) : "—"}
+                      {h.isBot && (
+                        <span className="inline-flex items-center rounded-full bg-[var(--surface-2)] px-1.5 py-px text-[9px] font-bold text-[var(--muted)]">
+                          BOT
+                        </span>
+                      )}
                     </span>
                     <span className="font-semibold text-right">
                       {formatNumber(h.prize, 2)}
                     </span>
                     <span className="text-[var(--muted)] text-right">
-                      {timeAgo(h.endedAt)}
+                      {timeAgoPure(h.endedAt, nowMs)}
                     </span>
                   </div>
                 ))}

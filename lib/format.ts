@@ -45,8 +45,13 @@ export function shortAddress(addr?: string | null): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
+// Impure — reads Date.now() internally. Do NOT call in render; use timeAgoPure instead.
 export function timeAgo(ts: number): string {
-  const diff = Date.now() - ts;
+  return timeAgoPure(ts, Date.now());
+}
+
+export function timeAgoPure(ts: number, now: number): string {
+  const diff = now - ts;
   const s = Math.floor(diff / 1000);
   if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);

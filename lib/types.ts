@@ -71,9 +71,17 @@ export interface LmsBet {
   roundId: string;
 }
 
+export interface LmsPendingClaim {
+  id: string;
+  roundId: string;
+  address: string;
+  amount: number;
+  createdAt: number; // epoch ms
+}
+
 export interface LmsRound {
   id: string;
-  status: "active" | "ended" | "claimed";
+  status: "active" | "ended";
   endsAt: number; // epoch ms
   prizePool: number; // 80% of all bets accumulate here
   treasuryPool: number; // 15% of all bets
@@ -88,4 +96,5 @@ export interface LmsHistoryEntry {
   winner: string | null;
   prize: number;
   endedAt: number;
+  isBot?: boolean;
 }
