@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   ArrowLeftRight,
+  Coins,
   Droplets,
   Gift,
   Wallet,
@@ -32,6 +33,7 @@ const TX_ICON: Record<TxType, React.ReactNode> = {
   "add-liquidity": <PlusCircle className="h-4 w-4" />,
   "remove-liquidity": <MinusCircle className="h-4 w-4" />,
   claim: <Gift className="h-4 w-4" />,
+  bet: <Coins className="h-4 w-4" />,
 };
 
 export default function PortfolioPage() {

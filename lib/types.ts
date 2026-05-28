@@ -40,7 +40,12 @@ export interface AirdropCampaign {
   createdAt: number; // epoch ms
 }
 
-export type TxType = "swap" | "add-liquidity" | "remove-liquidity" | "claim";
+export type TxType =
+  | "swap"
+  | "add-liquidity"
+  | "remove-liquidity"
+  | "claim"
+  | "bet";
 
 export interface Transaction {
   id: string;

@@ -13,6 +13,7 @@ const LINKS = [
   { href: "/pools", label: "Pools" },
   { href: "/staking", label: "Staking" },
   { href: "/airdrop", label: "Airdrop" },
+  { href: "/games", label: "Games" },
 ];
 
 export function Navbar() {

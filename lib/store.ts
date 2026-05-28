@@ -74,6 +74,18 @@ interface DexState {
   // airdrops
   claimAirdrop: (campaignId: string) => { ok: boolean; error?: string };
 
+  // games (prototype — mock RNG, USDT as the only bet token for now)
+  placeBet: (
+    choice: "heads" | "tails",
+    amount: number,
+  ) => {
+    ok: boolean;
+    error?: string;
+    won?: boolean;
+    outcome?: "heads" | "tails";
+    payout?: number;
+  };
+
   // admin
   createCampaign: (
     c: Omit<AirdropCampaign, "id" | "claimedCount" | "createdAt">,
@@ -301,6 +313,40 @@ export const useDexStore = create<DexState>()(
           };
         });
         return { ok: true };
+      },
+
+      // Coin Flip — 50/50, 1.95x payout (5% house edge). Outcome is rolled
+      // here so the page can choose to reveal it with an animation delay.
+      placeBet: (choice, amount) => {
+        const { address, balances } = get();
+        if (!address) return { ok: false, error: "Connect your wallet first" };
+        if (!amount || amount <= 0)
+          return { ok: false, error: "Enter an amount" };
+        const usdt = balances[address]?.USDT ?? 0;
+        if (amount > usdt) return { ok: false, error: "Insufficient USDT" };
+
+        const outcome: "heads" | "tails" =
+          Math.random() < 0.5 ? "heads" : "tails";
+        const won = outcome === choice;
+        const payout = won ? amount * 1.95 : 0;
+        const delta = won ? amount * 0.95 : -amount;
+
+        set((s) => {
+          const a = { ...(s.balances[address] ?? {}) };
+          a.USDT = (a.USDT ?? 0) + delta;
+          return {
+            balances: { ...s.balances, [address]: a },
+            transactions: pushTx(
+              s.transactions,
+              "bet",
+              won
+                ? `Coin Flip · ${choice} → ${outcome} · won ${payout.toFixed(2)} USDT`
+                : `Coin Flip · ${choice} → ${outcome} · lost ${amount.toFixed(2)} USDT`,
+              address,
+            ),
+          };
+        });
+        return { ok: true, won, outcome, payout };
       },
 
       createCampaign: (c) =>
