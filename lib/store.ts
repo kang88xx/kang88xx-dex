@@ -3,7 +3,14 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { useSyncExternalStore } from "react";
-import type { AirdropCampaign, LpPosition, Transaction } from "./types";
+import type {
+  AirdropCampaign,
+  LpPosition,
+  LmsBet,
+  LmsRound,
+  LmsHistoryEntry,
+  Transaction,
+} from "./types";
 import {
   ADMIN_PASSWORD,
   POOL_MAP,
@@ -28,6 +35,23 @@ const DEFAULT_BALANCES: Record<string, number> = {
 
 const SWAP_FEE = 0.003; // 0.3%
 
+// ─── Last Man Standing constants ─────────────────────────────────────────────
+const LMS_MIN_BET = 1;
+const LMS_BET_ADDS_MS = 30_000;
+const LMS_MAX_REMAINING_MS = 120_000;
+const LMS_FEE_PRIZE = 0.8;
+const LMS_FEE_TREASURY = 0.15;
+// LMS_FEE_BURN = 0.05 (remainder)
+
+const PHANTOM_BOTS: string[] = [
+  "0xdeadbeef00000000000000000000000000000001",
+  "0xdeadbeef00000000000000000000000000000002",
+  "0xdeadbeef00000000000000000000000000000003",
+  "0xdeadbeef00000000000000000000000000000004",
+  "0xdeadbeef00000000000000000000000000000005",
+  "0xdeadbeef00000000000000000000000000000006",
+];
+
 function randomAddress(): string {
   const hex = "0123456789abcdef";
   let a = "0x";
@@ -37,6 +61,56 @@ function randomAddress(): string {
 
 function uid(prefix = ""): string {
   return prefix + Math.random().toString(36).slice(2, 10);
+}
+
+function makeFreshRound(): LmsRound {
+  return {
+    id: uid("round_"),
+    status: "active",
+    endsAt: Date.now() + 60_000,
+    prizePool: 0,
+    treasuryPool: 0,
+    burnedPool: 0,
+    lastBettor: null,
+    bets: [],
+    botBetCount: 0,
+  };
+}
+
+function applyBetToRound(
+  round: LmsRound,
+  bettor: string,
+  amount: number,
+): LmsRound {
+  const prize = amount * LMS_FEE_PRIZE;
+  const treasury = amount * LMS_FEE_TREASURY;
+  const burn = amount - prize - treasury;
+
+  const now = Date.now();
+  const newBet: LmsBet = {
+    id: uid("bet_"),
+    address: bettor,
+    amount,
+    timestamp: now,
+    roundId: round.id,
+  };
+
+  const currentRemaining = round.endsAt - now;
+  const newRemaining = Math.min(
+    currentRemaining + LMS_BET_ADDS_MS,
+    LMS_MAX_REMAINING_MS,
+  );
+  const newEndsAt = now + newRemaining;
+
+  return {
+    ...round,
+    prizePool: round.prizePool + prize,
+    treasuryPool: round.treasuryPool + treasury,
+    burnedPool: round.burnedPool + burn,
+    lastBettor: bettor,
+    endsAt: newEndsAt,
+    bets: [newBet, ...round.bets],
+  };
 }
 
 interface DexState {
@@ -52,6 +126,12 @@ interface DexState {
 
   transactions: Transaction[];
   campaigns: AirdropCampaign[];
+
+  // Last Man Standing
+  lms: {
+    round: LmsRound;
+    history: LmsHistoryEntry[];
+  };
 
   // wallet actions
   connectWallet: () => void;
@@ -74,17 +154,12 @@ interface DexState {
   // airdrops
   claimAirdrop: (campaignId: string) => { ok: boolean; error?: string };
 
-  // games (prototype — mock RNG, USDT as the only bet token for now)
-  placeBet: (
-    choice: "heads" | "tails",
-    amount: number,
-  ) => {
-    ok: boolean;
-    error?: string;
-    won?: boolean;
-    outcome?: "heads" | "tails";
-    payout?: number;
-  };
+  // games — Last Man Standing
+  lmsEnsureRound: () => void;
+  lmsPlaceBet: (amount: number) => { ok: boolean; error?: string };
+  lmsCheckExpiry: () => void;
+  lmsClaim: () => { ok: boolean; error?: string; payout?: number };
+  lmsBotTick: () => void;
 
   // admin
   createCampaign: (
@@ -119,6 +194,10 @@ export const useDexStore = create<DexState>()(
       claims: {},
       transactions: [],
       campaigns: seedCampaigns(),
+      lms: {
+        round: makeFreshRound(),
+        history: [],
+      },
 
       connectWallet: () => {
         const existing = get().address;
@@ -315,38 +394,149 @@ export const useDexStore = create<DexState>()(
         return { ok: true };
       },
 
-      // Coin Flip — 50/50, 1.95x payout (5% house edge). Outcome is rolled
-      // here so the page can choose to reveal it with an animation delay.
-      placeBet: (choice, amount) => {
-        const { address, balances } = get();
+      // ─── Last Man Standing actions ───────────────────────────────────────
+
+      lmsEnsureRound: () => {
+        const { lms } = get();
+        const now = Date.now();
+        // If stored round is expired (endsAt far in the past) and still active,
+        // expire it. If no round exists at all, create one.
+        if (!lms.round) {
+          set((s) => ({ lms: { ...s.lms, round: makeFreshRound() } }));
+          return;
+        }
+        if (lms.round.status === "active" && now > lms.round.endsAt) {
+          const winner = lms.round.lastBettor;
+          const historyEntry: LmsHistoryEntry = {
+            roundId: lms.round.id,
+            winner,
+            prize: lms.round.prizePool,
+            endedAt: lms.round.endsAt,
+          };
+          set((s) => ({
+            lms: {
+              round: { ...s.lms.round, status: "ended" },
+              history: [historyEntry, ...s.lms.history].slice(0, 20),
+            },
+          }));
+        }
+      },
+
+      lmsPlaceBet: (amount) => {
+        const { address, balances, lms } = get();
         if (!address) return { ok: false, error: "Connect your wallet first" };
-        if (!amount || amount <= 0)
-          return { ok: false, error: "Enter an amount" };
+        if (!amount || amount < LMS_MIN_BET)
+          return {
+            ok: false,
+            error: `Minimum bet is ${LMS_MIN_BET} USDT`,
+          };
         const usdt = balances[address]?.USDT ?? 0;
         if (amount > usdt) return { ok: false, error: "Insufficient USDT" };
+        if (lms.round.status !== "active")
+          return { ok: false, error: "Round is not active" };
 
-        const outcome: "heads" | "tails" =
-          Math.random() < 0.5 ? "heads" : "tails";
-        const won = outcome === choice;
-        const payout = won ? amount * 1.95 : 0;
-        const delta = won ? amount * 0.95 : -amount;
+        const updatedRound = applyBetToRound(lms.round, address, amount);
 
         set((s) => {
           const a = { ...(s.balances[address] ?? {}) };
-          a.USDT = (a.USDT ?? 0) + delta;
+          a.USDT = (a.USDT ?? 0) - amount;
           return {
             balances: { ...s.balances, [address]: a },
+            lms: { ...s.lms, round: updatedRound },
             transactions: pushTx(
               s.transactions,
               "bet",
-              won
-                ? `Coin Flip · ${choice} → ${outcome} · won ${payout.toFixed(2)} USDT`
-                : `Coin Flip · ${choice} → ${outcome} · lost ${amount.toFixed(2)} USDT`,
+              `Placed ${amount.toFixed(2)} USDT into round #${lms.round.id}`,
               address,
             ),
           };
         });
-        return { ok: true, won, outcome, payout };
+        return { ok: true };
+      },
+
+      lmsCheckExpiry: () => {
+        const { lms } = get();
+        if (lms.round.status !== "active") return;
+        const now = Date.now();
+        if (now <= lms.round.endsAt) return;
+
+        const winner = lms.round.lastBettor;
+        // If no bets at all, start a fresh round immediately
+        if (!winner) {
+          set((s) => ({ lms: { ...s.lms, round: makeFreshRound() } }));
+          return;
+        }
+        // Otherwise mark ended so winner can claim
+        set((s) => ({
+          lms: { ...s.lms, round: { ...s.lms.round, status: "ended" } },
+        }));
+      },
+
+      lmsClaim: () => {
+        const { address, lms } = get();
+        if (!address) return { ok: false, error: "Connect your wallet first" };
+        if (lms.round.status !== "ended")
+          return { ok: false, error: "Round not ended yet" };
+        if (lms.round.lastBettor !== address)
+          return { ok: false, error: "You are not the winner" };
+
+        const payout = lms.round.prizePool;
+        const historyEntry: LmsHistoryEntry = {
+          roundId: lms.round.id,
+          winner: address,
+          prize: payout,
+          endedAt: Date.now(),
+        };
+
+        set((s) => {
+          const a = { ...(s.balances[address] ?? {}) };
+          a.USDT = (a.USDT ?? 0) + payout;
+          return {
+            balances: { ...s.balances, [address]: a },
+            lms: {
+              round: makeFreshRound(),
+              history: [historyEntry, ...s.lms.history].slice(0, 20),
+            },
+            transactions: pushTx(
+              s.transactions,
+              "bet",
+              `Claimed ${payout.toFixed(2)} USDT from round #${lms.round.id}`,
+              address,
+            ),
+          };
+        });
+        return { ok: true, payout };
+      },
+
+      lmsBotTick: () => {
+        const { lms } = get();
+        if (lms.round.status !== "active") return;
+        const now = Date.now();
+        const remaining = lms.round.endsAt - now;
+        if (remaining <= 5_000) return;
+        if (lms.round.botBetCount >= 5) return;
+
+        // Check last bet time (skip if a bet was placed within the last 5s)
+        const lastBet = lms.round.bets[0];
+        if (lastBet && now - lastBet.timestamp < 5_000) return;
+
+        if (Math.random() >= 0.6) return;
+
+        const botAddr =
+          PHANTOM_BOTS[Math.floor(Math.random() * PHANTOM_BOTS.length)];
+        const betAmount = Math.floor(Math.random() * 5) + 1; // 1-5 USDT
+
+        const updatedRound = applyBetToRound(lms.round, botAddr, betAmount);
+
+        set((s) => ({
+          lms: {
+            ...s.lms,
+            round: {
+              ...updatedRound,
+              botBetCount: s.lms.round.botBetCount + 1,
+            },
+          },
+        }));
       },
 
       createCampaign: (c) =>
@@ -399,8 +589,9 @@ export const useDexStore = create<DexState>()(
     }),
     {
       // bumped from helix-dex-store → reseeds with IOI tokens/campaigns
+      // v3: replaced Coin Flip with Last Man Standing
       name: "ioi-dex-store",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => localStorage),
     },
   ),

@@ -60,3 +60,32 @@ export interface LpPosition {
   amountUsd: number; // value supplied
   sharePct: number; // pool share %
 }
+
+// ─── Last Man Standing ───────────────────────────────────────────────────────
+
+export interface LmsBet {
+  id: string;
+  address: string; // bettor address (real or phantom)
+  amount: number; // USDT placed
+  timestamp: number; // epoch ms
+  roundId: string;
+}
+
+export interface LmsRound {
+  id: string;
+  status: "active" | "ended" | "claimed";
+  endsAt: number; // epoch ms
+  prizePool: number; // 80% of all bets accumulate here
+  treasuryPool: number; // 15% of all bets
+  burnedPool: number; // 5% of all bets
+  lastBettor: string | null; // address of most recent bettor
+  bets: LmsBet[];
+  botBetCount: number; // guard rail: max 5 bot bets per round
+}
+
+export interface LmsHistoryEntry {
+  roundId: string;
+  winner: string | null;
+  prize: number;
+  endedAt: number;
+}
