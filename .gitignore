@@ -40,3 +40,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .gstack/
+
+# oh-my-claudecode / omx state (transient, machine-local)
+.omc/state/
+.omc/sessions/
+.omc/logs/
+.omx/state/
+.omx/logs/

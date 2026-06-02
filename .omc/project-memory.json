@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1779874266873,
+  "lastScanned": 1780363328365,
   "projectRoot": "/Users/henry/Desktop/04_Project_AI/DEX",
   "techStack": {
     "languages": [
@@ -76,7 +76,7 @@
       "path": "app",
       "purpose": "Application code",
       "fileCount": 4,
-      "lastAccessed": 1779874266865,
+      "lastAccessed": 1780363328344,
       "keyFiles": [
         "favicon.ico",
         "globals.css",
@@ -88,7 +88,7 @@
       "path": "components",
       "purpose": "UI components",
       "fileCount": 13,
-      "lastAccessed": 1779874266865,
+      "lastAccessed": 1780363328344,
       "keyFiles": [
         "AddLiquidityModal.tsx",
         "IOILogo.tsx",
@@ -101,7 +101,7 @@
       "path": "lib",
       "purpose": "Library code",
       "fileCount": 4,
-      "lastAccessed": 1779874266868,
+      "lastAccessed": 1780363328348,
       "keyFiles": [
         "format.ts",
         "mock-data.ts",
@@ -113,7 +113,7 @@
       "path": "public",
       "purpose": "Public files",
       "fileCount": 5,
-      "lastAccessed": 1779874266868,
+      "lastAccessed": 1780363328349,
       "keyFiles": [
         "file.svg",
         "globe.svg",

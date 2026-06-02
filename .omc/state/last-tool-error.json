@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"echo \\\"=== package.json ===\\\" && cat package.json && echo \\\"=== app/ ===\\\" && ls -la app && echo \\\"=== postcss ===\\\" && cat postcss.config.mjs && echo \\\"=== tsconfig ===\\\" && cat tsconfig....",
-  "error": "Exit code 1\n=== package.json ===\n{\n  \"dependencies\": {\n    \"lucide-react\": \"^1.16.0\",\n    \"recharts\": \"^3.8.1\",\n    \"zustand\": \"^5.0.13\"\n  }\n}\n=== app/ ===\nls: app: No such file or directory",
-  "timestamp": "2026-05-27T06:16:38.783Z",
-  "retry_count": 2
-}
