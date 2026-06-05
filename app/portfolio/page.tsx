@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useAppKit } from "@reown/appkit/react";
 import {
   ArrowLeftRight,
   Coins,
@@ -40,7 +41,7 @@ export default function PortfolioPage() {
   const hydrated = useHydrated();
   const connected = useDexStore((s) => s.connected);
   const address = useDexStore((s) => s.address);
-  const connectWallet = useDexStore((s) => s.connectWallet);
+  const { open: openWalletModal } = useAppKit();
   const balances = useBalances();
   const positions = usePositions().filter((p) => POOL_MAP[p.poolId]);
   const allTransactions = useDexStore((s) => s.transactions);
@@ -65,7 +66,7 @@ export default function PortfolioPage() {
           Connect to view your balances, positions, and activity.
         </p>
         <button
-          onClick={connectWallet}
+          onClick={() => openWalletModal()}
           className="mt-6 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
         >
           Connect Wallet

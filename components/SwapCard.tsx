@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ArrowDown, ChevronDown, Settings2 } from "lucide-react";
+import { useAppKit } from "@reown/appkit/react";
 import { TOKEN_MAP } from "@/lib/mock-data";
 import { useBalance, useDexStore, useHydrated } from "@/lib/store";
 import { formatNumber, formatUsd } from "@/lib/format";
@@ -15,7 +16,7 @@ const SWAP_FEE = 0.003;
 export function SwapCard() {
   const hydrated = useHydrated();
   const connected = useDexStore((s) => s.connected);
-  const connectWallet = useDexStore((s) => s.connectWallet);
+  const { open: openWalletModal } = useAppKit();
   const swap = useDexStore((s) => s.swap);
 
   const [from, setFrom] = useState("ETH");
@@ -182,10 +183,7 @@ export function SwapCard() {
           <div className="h-14 w-full rounded-2xl bg-[var(--surface-2)] animate-pulse-soft" />
         ) : !connected ? (
           <button
-            onClick={() => {
-              connectWallet();
-              toast.success("Wallet connected (demo)");
-            }}
+            onClick={() => openWalletModal()}
             className="flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-[var(--accent)] text-base font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
           >
             Connect Wallet

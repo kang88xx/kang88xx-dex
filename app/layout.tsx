@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Inter_Tight, IBM_Plex_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import Script from "next/script";
 import "./globals.css";
+import { Providers } from "./providers";
 import { Navbar } from "@/components/Navbar";
 import { Toaster } from "@/components/toast";
 import { GlyphX } from "@/components/IOILogo";
@@ -26,11 +28,14 @@ export const metadata: Metadata = {
     "IOI is a decentralized exchange: swap tokens, provide liquidity, track markets, stake, and claim airdrops. Built onchain, designed for scale.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // wagmi SSR: rehydrate the wallet session from the request cookie
+  const cookies = (await headers()).get("cookie");
+
   return (
     <html
       lang="en"
@@ -41,6 +46,7 @@ export default function RootLayout({
         <Script id="theme-init" strategy="beforeInteractive">
           {THEME_INIT}
         </Script>
+        <Providers cookies={cookies}>
         <Navbar />
         <main className="flex-1">{children}</main>
         <footer className="border-t border-[var(--border)] py-7">
@@ -59,11 +65,12 @@ export default function RootLayout({
                 <span className="h-1.5 w-1.5 bg-[var(--dot-yellow)]" />
                 Prototype · mock data
               </span>
-              <span>Ethereum · EVM</span>
+              <span>BNB Smart Chain</span>
             </div>
           </div>
         </footer>
         <Toaster />
+        </Providers>
       </body>
     </html>
   );

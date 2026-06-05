@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useAppKit } from "@reown/appkit/react";
 import {
   Gift,
   Check,
@@ -84,7 +85,7 @@ export default function AirdropPage() {
 function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
   const connected = useDexStore((s) => s.connected);
   const address = useDexStore((s) => s.address);
-  const connectWallet = useDexStore((s) => s.connectWallet);
+  const { open: openWalletModal } = useAppKit();
   const claimAirdrop = useDexStore((s) => s.claimAirdrop);
   const claimedIds = useClaimedIds();
   const positions = usePositions();
@@ -183,10 +184,7 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
       <div className="mt-auto pt-5">
         {!connected ? (
           <button
-            onClick={() => {
-              connectWallet();
-              toast.success("Wallet connected (demo)");
-            }}
+            onClick={() => openWalletModal()}
             className="h-12 w-full rounded-2xl bg-[var(--accent)] font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
           >
             Connect to claim

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { X, Plus } from "lucide-react";
+import { useAppKit } from "@reown/appkit/react";
 import { POOL_MAP, TOKEN_MAP } from "@/lib/mock-data";
 import { useBalances, useDexStore, useHydrated } from "@/lib/store";
 import { formatNumber, formatUsd } from "@/lib/format";
@@ -17,7 +18,7 @@ export function AddLiquidityModal({
 }) {
   const hydrated = useHydrated();
   const connected = useDexStore((s) => s.connected);
-  const connectWallet = useDexStore((s) => s.connectWallet);
+  const { open: openWalletModal } = useAppKit();
   const addLiquidity = useDexStore((s) => s.addLiquidity);
   const balances = useBalances();
   const [amount, setAmount] = useState("");
@@ -177,10 +178,7 @@ export function AddLiquidityModal({
               <div className="h-12 w-full rounded-2xl bg-[var(--surface-2)] animate-pulse-soft" />
             ) : !connected ? (
               <button
-                onClick={() => {
-                  connectWallet();
-                  toast.success("Wallet connected (demo)");
-                }}
+                onClick={() => openWalletModal()}
                 className="h-12 w-full rounded-2xl bg-[var(--accent)] font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
               >
                 Connect Wallet

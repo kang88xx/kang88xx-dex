@@ -64,13 +64,6 @@ const PHANTOM_BOTS: string[] = [
   "0xdeadbeef00000000000000000000000000000006",
 ];
 
-function randomAddress(): string {
-  const hex = "0123456789abcdef";
-  let a = "0x";
-  for (let i = 0; i < 40; i++) a += hex[Math.floor(Math.random() * 16)];
-  return a;
-}
-
 function uid(prefix = ""): string {
   return prefix + Math.random().toString(36).slice(2, 10);
 }
@@ -187,8 +180,8 @@ interface DexState {
   };
 
   // wallet actions
-  connectWallet: () => void;
-  disconnectWallet: () => void;
+  /** Mirror the real wagmi/AppKit session into the store (null = disconnected). */
+  setWalletSession: (address: string | null) => void;
   loginAdmin: (pw: string) => boolean;
   logoutAdmin: () => void;
 
@@ -253,9 +246,11 @@ export const useDexStore = create<DexState>()(
         pendingClaims: [],
       },
 
-      connectWallet: () => {
-        const existing = get().address;
-        const address = existing ?? randomAddress();
+      setWalletSession: (address) => {
+        if (!address) {
+          set({ connected: false, address: null, isAdmin: false });
+          return;
+        }
         set((s) => ({
           connected: true,
           address,
@@ -264,8 +259,6 @@ export const useDexStore = create<DexState>()(
             : { ...s.balances, [address]: { ...DEFAULT_BALANCES } },
         }));
       },
-
-      disconnectWallet: () => set({ connected: false, isAdmin: false }),
 
       loginAdmin: (pw) => {
         if (pw === ADMIN_PASSWORD) {
@@ -655,9 +648,23 @@ export const useDexStore = create<DexState>()(
       // bumped from helix-dex-store → reseeds with IOI tokens/campaigns
       // v3: replaced Coin Flip with Last Man Standing
       // v4: unified round finalization, pendingClaims, LMS_CONFIG export
+      // v5: real wallet via Reown AppKit — connected/address now mirror wagmi
+      //     and are no longer persisted here (wagmi cookie storage owns them)
       name: "ioi-dex-store",
-      version: 4,
+      version: 5,
       storage: createJSONStorage(() => localStorage),
+      partialize: (s) =>
+        Object.fromEntries(
+          Object.entries(s).filter(
+            ([k]) => !["connected", "address"].includes(k),
+          ),
+        ) as DexState,
+      migrate: (persisted) => {
+        const p = persisted as Record<string, unknown>;
+        delete p.connected;
+        delete p.address;
+        return p as unknown as DexState;
+      },
     },
   ),
 );

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Coins, Trophy, Clock, Flame, Users, TrendingUp } from "lucide-react";
+import { useAppKit } from "@reown/appkit/react";
 import { useDexStore, useHydrated, useBalance, LMS_CONFIG } from "@/lib/store";
 import { formatNumber, shortAddress, timeAgoPure } from "@/lib/format";
 import { toast } from "@/components/toast";
@@ -22,7 +23,7 @@ export default function GamesPage() {
   const hydrated = useHydrated();
   const connected = useDexStore((s) => s.connected);
   const address = useDexStore((s) => s.address);
-  const connectWallet = useDexStore((s) => s.connectWallet);
+  const { open: openWalletModal } = useAppKit();
   const round = useDexStore((s) => s.lms.round);
   const history = useDexStore((s) => s.lms.history);
   const pendingClaims = useDexStore((s) => s.lms.pendingClaims);
@@ -390,10 +391,7 @@ export default function GamesPage() {
                 <div className="h-12 w-full rounded-2xl bg-[var(--surface-2)] animate-pulse-soft" />
               ) : !connected ? (
                 <button
-                  onClick={() => {
-                    connectWallet();
-                    toast.success("Wallet connected (demo)");
-                  }}
+                  onClick={() => openWalletModal()}
                   className="h-12 w-full rounded-2xl bg-[var(--accent)] font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
                 >
                   Connect Wallet

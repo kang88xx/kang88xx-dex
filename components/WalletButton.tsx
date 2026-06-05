@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, LogOut, Check } from "lucide-react";
+import { Copy, LogOut, Check, Wallet } from "lucide-react";
+import { useAppKit } from "@reown/appkit/react";
+import { useDisconnect } from "wagmi";
 import { useDexStore, useHydrated } from "@/lib/store";
 import { shortAddress } from "@/lib/format";
 import { toast } from "./toast";
@@ -11,10 +13,10 @@ export function WalletButton() {
   const hydrated = useHydrated();
   const connected = useDexStore((s) => s.connected);
   const address = useDexStore((s) => s.address);
-  const connectWallet = useDexStore((s) => s.connectWallet);
-  const disconnectWallet = useDexStore((s) => s.disconnectWallet);
+  const { open } = useAppKit();
+  const { disconnect } = useDisconnect();
 
-  const [open, setOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
   if (!hydrated) {
@@ -26,10 +28,7 @@ export function WalletButton() {
   if (!connected) {
     return (
       <button
-        onClick={() => {
-          connectWallet();
-          toast.success("Wallet connected (demo)");
-        }}
+        onClick={() => open()}
         className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] py-1.5 pl-4 pr-1.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
       >
         Connect Wallet
@@ -48,18 +47,18 @@ export function WalletButton() {
   return (
     <div className="relative">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setMenuOpen((v) => !v)}
         className="inline-flex items-center gap-2 rounded-full border border-[var(--border-strong)] bg-[var(--card)] px-3 py-2 text-sm font-medium transition-colors hover:bg-[var(--surface)]"
       >
         <span className="h-2 w-2 rounded-full bg-[var(--up)]" />
         <span className="font-mono">{shortAddress(address)}</span>
       </button>
 
-      {open && (
+      {menuOpen && (
         <>
           <div
             className="fixed inset-0 z-40"
-            onClick={() => setOpen(false)}
+            onClick={() => setMenuOpen(false)}
           />
           <div className="animate-fade-in absolute right-0 top-12 z-50 w-56 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1.5 shadow-xl shadow-black/5">
             <div className="px-3 py-2">
@@ -80,8 +79,18 @@ export function WalletButton() {
             </button>
             <button
               onClick={() => {
-                disconnectWallet();
-                setOpen(false);
+                setMenuOpen(false);
+                open({ view: "Account" });
+              }}
+              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-[var(--surface)]"
+            >
+              <Wallet className="h-4 w-4 text-[var(--muted)]" />
+              Wallet details
+            </button>
+            <button
+              onClick={() => {
+                disconnect();
+                setMenuOpen(false);
                 toast.info("Wallet disconnected");
               }}
               className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-[var(--down)] transition-colors hover:bg-[var(--down-soft)]"

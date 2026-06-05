@@ -14,7 +14,7 @@ export default function Home() {
           <div className="flex flex-wrap items-center gap-3">
             <span className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card)] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.06em] text-[var(--muted)]">
               <span className="h-1.5 w-1.5 bg-[var(--dot-yellow)]" />
-              Live on Ethereum · EVM
+              Live on BNB Smart Chain
             </span>
             <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted-2)]">
               Innovate · Own · Inspire
