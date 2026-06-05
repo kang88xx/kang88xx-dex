@@ -5,6 +5,7 @@ import { Search, X } from "lucide-react";
 import { TOKENS } from "@/lib/tokens";
 import { useBalances } from "@/lib/balances";
 import { useMarket } from "@/lib/market";
+import { isTradable } from "@/lib/pancake";
 import { formatNumber, formatUsd } from "@/lib/format";
 import { TokenLogo } from "./TokenLogo";
 
@@ -13,11 +14,14 @@ export function TokenSelectModal({
   onClose,
   onSelect,
   exclude,
+  tradableOnly,
 }: {
   open: boolean;
   onClose: () => void;
   onSelect: (symbol: string) => void;
   exclude?: string;
+  /** Hide tokens without a swappable BSC contract (e.g. undeployed IOI) */
+  tradableOnly?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const balances = useBalances();
@@ -74,6 +78,7 @@ export function TokenSelectModal({
 
   const filtered = TOKENS.filter((t) => {
     if (t.symbol === exclude) return false;
+    if (tradableOnly && !isTradable(t.symbol)) return false;
     const q = query.toLowerCase();
     return (
       t.symbol.toLowerCase().includes(q) || t.name.toLowerCase().includes(q)

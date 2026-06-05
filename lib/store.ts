@@ -167,6 +167,9 @@ interface DexState {
   loginAdmin: (pw: string) => boolean;
   logoutAdmin: () => void;
 
+  /** Record a confirmed on-chain transaction for the activity feed. */
+  recordTransaction: (type: Transaction["type"], summary: string) => void;
+
   // games — Last Man Standing (bot demo rounds only; user bets/claims are
   // disabled until the on-chain game contract ships)
   lmsEnsureRound: () => void;
@@ -216,6 +219,20 @@ export const useDexStore = create<DexState>()(
       },
 
       logoutAdmin: () => set({ isAdmin: false }),
+
+      recordTransaction: (type, summary) =>
+        set((s) => ({
+          transactions: [
+            {
+              id: uid("tx_"),
+              type,
+              summary,
+              timestamp: Date.now(),
+              address: s.address ?? "",
+            },
+            ...s.transactions,
+          ].slice(0, 60),
+        })),
 
       // ─── Last Man Standing actions ───────────────────────────────────────
 

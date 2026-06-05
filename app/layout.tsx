@@ -63,7 +63,7 @@ export default async function RootLayout({
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] uppercase tracking-[0.06em] text-[var(--muted)]">
               <span className="inline-flex items-center gap-2">
                 <span className="h-1.5 w-1.5 bg-[var(--dot-yellow)]" />
-                Beta · on-chain trading soon
+                Beta · live swaps
               </span>
               <span>BNB Smart Chain</span>
             </div>
