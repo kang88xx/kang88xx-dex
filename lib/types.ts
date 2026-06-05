@@ -1,15 +1,27 @@
-// Domain types for the DEX prototype (mock / no real chain)
+// Domain types for the IOI DEX (BSC)
 
 export interface Token {
   symbol: string;
   name: string;
-  address: string;
+  /** BSC contract address; null for the native coin (BNB) or undeployed tokens */
+  address: string | null;
   decimals: number;
-  priceUsd: number;
+  /** CoinGecko id for live market data; null = unlisted (mock market data) */
+  coingeckoId: string | null;
+  priceUsd: number; // seed value — overridden by live data when available
   change24h: number; // % change, can be negative
   volume24h: number; // USD
   marketCap: number; // USD
   color: string; // logo background color
+}
+
+/** Live market snapshot for one token (from CoinGecko via /api/prices) */
+export interface MarketData {
+  priceUsd: number;
+  change24h: number;
+  volume24h: number;
+  marketCap: number;
+  spark7d: number[]; // 7-day sparkline prices (may be empty)
 }
 
 export interface Pool {

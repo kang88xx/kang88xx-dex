@@ -7,7 +7,8 @@ import {
   Tooltip,
   YAxis,
 } from "recharts";
-import { getPriceHistory, getToken, type ChartRange } from "@/lib/mock-data";
+import { getPriceHistory, type ChartRange } from "@/lib/mock-data";
+import { usePriceHistory, useTokenMarket } from "@/lib/market";
 import { formatUsd } from "@/lib/format";
 
 const RANGES: ChartRange[] = ["1D", "1W", "1M", "1Y"];
@@ -25,15 +26,15 @@ export function PriceChart({
   height?: number;
   showRanges?: boolean;
 }) {
-  const token = getToken(symbol);
-  const data = getPriceHistory(symbol, range);
-  const up = (token?.change24h ?? 0) >= 0;
+  const { change24h } = useTokenMarket(symbol);
+  const { data, isLoading } = usePriceHistory(symbol, range);
+  const up = change24h >= 0;
   const stroke = up ? "var(--up)" : "var(--down)";
   const gradId = `grad-${symbol}-${range}`;
 
   const prices = data.map((d) => d.price);
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
+  const min = prices.length ? Math.min(...prices) : 0;
+  const max = prices.length ? Math.max(...prices) : 0;
   const pad = (max - min) * 0.15 || max * 0.05;
 
   return (
@@ -57,6 +58,12 @@ export function PriceChart({
           </div>
         </div>
       )}
+      {isLoading || data.length === 0 ? (
+        <div
+          className="animate-pulse-soft rounded-2xl bg-[var(--surface-2)]"
+          style={{ height }}
+        />
+      ) : (
       <ResponsiveContainer width="100%" height={height}>
         <AreaChart data={data} margin={{ top: 8, right: 0, bottom: 0, left: 0 }}>
           <defs>
@@ -77,7 +84,7 @@ export function PriceChart({
             }}
             labelStyle={{ color: "var(--muted)" }}
             itemStyle={{ color: "var(--foreground)" }}
-            labelFormatter={(l) => `T-${l}`}
+            labelFormatter={(l) => data[Number(l)]?.label ?? ""}
             formatter={(v) => [formatUsd(Number(v)), "Price"] as [string, string]}
           />
           <Area
@@ -91,15 +98,25 @@ export function PriceChart({
           />
         </AreaChart>
       </ResponsiveContainer>
+      )}
     </div>
   );
 }
 
-/** Tiny inline sparkline for table rows */
-export function Sparkline({ symbol }: { symbol: string }) {
-  const data = getPriceHistory(symbol, "1W");
-  const token = getToken(symbol);
-  const up = (token?.change24h ?? 0) >= 0;
+/** Tiny inline sparkline for table rows (live 7d data, mock for unlisted) */
+export function Sparkline({
+  symbol,
+  data: spark,
+  up,
+}: {
+  symbol: string;
+  data: number[];
+  up: boolean;
+}) {
+  const data =
+    spark.length > 0
+      ? spark.map((price, i) => ({ t: i, price }))
+      : getPriceHistory(symbol, "1W");
   return (
     <ResponsiveContainer width={88} height={36}>
       <AreaChart data={data}>

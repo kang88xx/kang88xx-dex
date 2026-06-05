@@ -19,7 +19,6 @@ import {
 } from "@/lib/store";
 import { daysUntil, formatCompact, formatUsd, isPast } from "@/lib/format";
 import { TokenLogo } from "@/components/TokenLogo";
-import { toast } from "@/components/toast";
 import { Eyebrow } from "@/components/ui";
 import type { AirdropCampaign, Eligibility } from "@/lib/types";
 
@@ -86,7 +85,6 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
   const connected = useDexStore((s) => s.connected);
   const address = useDexStore((s) => s.address);
   const { open: openWalletModal } = useAppKit();
-  const claimAirdrop = useDexStore((s) => s.claimAirdrop);
   const claimedIds = useClaimedIds();
   const positions = usePositions();
 
@@ -111,15 +109,6 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
   }
 
   const meta = ELIGIBILITY_META[c.eligibility];
-
-  const claim = () => {
-    const res = claimAirdrop(c.id);
-    if (res.ok) {
-      toast.success(`Claimed ${c.amountPerClaim} ${c.tokenSymbol}!`);
-    } else {
-      toast.error(res.error ?? "Claim failed");
-    }
-  };
 
   return (
     <div className="flex flex-col rounded-3xl border border-[var(--border)] bg-[var(--card)] p-6">
@@ -199,8 +188,7 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
           </button>
         ) : (
           <button
-            disabled={!eligible || ended || soldOut}
-            onClick={claim}
+            disabled
             className="h-12 w-full rounded-2xl bg-[var(--accent)] font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--muted-2)]"
           >
             {ended
@@ -209,7 +197,7 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
                 ? "Fully claimed"
                 : !eligible
                   ? "Not eligible"
-                  : "Claim"}
+                  : "On-chain claims coming soon"}
           </button>
         )}
       </div>

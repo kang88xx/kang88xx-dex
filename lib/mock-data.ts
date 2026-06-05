@@ -1,155 +1,24 @@
-import type { Token, Pool, AirdropCampaign } from "./types";
+import type { Pool, AirdropCampaign } from "./types";
+import { TOKEN_MAP } from "./tokens";
+
+// Token registry moved to lib/tokens.ts (BSC). Re-exported here so existing
+// imports keep working during the production transition.
+export { TOKENS, TOKEN_MAP, getToken } from "./tokens";
 
 // ------------------------------------------------------------------
-//  Tokens (mock market data, EVM-style addresses)
-// ------------------------------------------------------------------
-
-export const TOKENS: Token[] = [
-  {
-    symbol: "ETH",
-    name: "Ethereum",
-    address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-    decimals: 18,
-    priceUsd: 3124.55,
-    change24h: 2.41,
-    volume24h: 14_200_000_000,
-    marketCap: 376_000_000_000,
-    color: "#627eea",
-  },
-  {
-    symbol: "WBTC",
-    name: "Wrapped Bitcoin",
-    address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-    decimals: 8,
-    priceUsd: 64210.18,
-    change24h: 1.12,
-    volume24h: 5_400_000_000,
-    marketCap: 14_100_000_000,
-    color: "#f09242",
-  },
-  {
-    symbol: "USDC",
-    name: "USD Coin",
-    address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-    decimals: 6,
-    priceUsd: 1.0,
-    change24h: 0.01,
-    volume24h: 8_900_000_000,
-    marketCap: 34_000_000_000,
-    color: "#2775ca",
-  },
-  {
-    symbol: "USDT",
-    name: "Tether",
-    address: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-    decimals: 6,
-    priceUsd: 1.0,
-    change24h: -0.02,
-    volume24h: 28_000_000_000,
-    marketCap: 110_000_000_000,
-    color: "#26a17b",
-  },
-  {
-    symbol: "DAI",
-    name: "Dai Stablecoin",
-    address: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
-    decimals: 18,
-    priceUsd: 1.0,
-    change24h: 0.0,
-    volume24h: 420_000_000,
-    marketCap: 5_300_000_000,
-    color: "#f5ac37",
-  },
-  {
-    symbol: "UNI",
-    name: "Uniswap",
-    address: "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
-    decimals: 18,
-    priceUsd: 9.42,
-    change24h: 4.85,
-    volume24h: 210_000_000,
-    marketCap: 5_650_000_000,
-    color: "#ff007a",
-  },
-  {
-    symbol: "LINK",
-    name: "Chainlink",
-    address: "0x514910771AF9Ca656af840dff83E8264EcF986CA",
-    decimals: 18,
-    priceUsd: 14.27,
-    change24h: -1.74,
-    volume24h: 390_000_000,
-    marketCap: 8_900_000_000,
-    color: "#2a5ada",
-  },
-  {
-    symbol: "ARB",
-    name: "Arbitrum",
-    address: "0xB50721BCf8d664c30412Cfbc6cf7a15145234ad1",
-    decimals: 18,
-    priceUsd: 0.782,
-    change24h: 6.32,
-    volume24h: 180_000_000,
-    marketCap: 3_100_000_000,
-    color: "#28a0f0",
-  },
-  {
-    symbol: "AAVE",
-    name: "Aave",
-    address: "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9",
-    decimals: 18,
-    priceUsd: 91.8,
-    change24h: -2.93,
-    volume24h: 150_000_000,
-    marketCap: 1_360_000_000,
-    color: "#b6509e",
-  },
-  {
-    symbol: "MATIC",
-    name: "Polygon",
-    address: "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0",
-    decimals: 18,
-    priceUsd: 0.541,
-    change24h: 3.17,
-    volume24h: 260_000_000,
-    marketCap: 5_000_000_000,
-    color: "#8247e5",
-  },
-  {
-    // The platform's native token — used for airdrops
-    symbol: "IOI",
-    name: "Innovate Own Inspire",
-    address: "0x1010101010101010101010101010101010101010",
-    decimals: 18,
-    priceUsd: 1.24,
-    change24h: 11.6,
-    volume24h: 42_000_000,
-    marketCap: 124_000_000,
-    color: "#1a1aee",
-  },
-];
-
-export const TOKEN_MAP: Record<string, Token> = Object.fromEntries(
-  TOKENS.map((t) => [t.symbol, t]),
-);
-
-export function getToken(symbol: string): Token | undefined {
-  return TOKEN_MAP[symbol];
-}
-
-// ------------------------------------------------------------------
-//  Liquidity pools
+//  Liquidity pools (BSC pairs — TVL/APR are placeholder numbers until
+//  real on-chain pools ship)
 // ------------------------------------------------------------------
 
 export const POOLS: Pool[] = [
-  { id: "eth-usdc", token0: "ETH", token1: "USDC", feeTier: 0.05, tvlUsd: 184_200_000, volume24h: 96_400_000, apr: 18.4 },
-  { id: "wbtc-eth", token0: "WBTC", token1: "ETH", feeTier: 0.3, tvlUsd: 142_800_000, volume24h: 54_100_000, apr: 12.9 },
+  { id: "bnb-usdt", token0: "BNB", token1: "USDT", feeTier: 0.05, tvlUsd: 184_200_000, volume24h: 96_400_000, apr: 18.4 },
+  { id: "btcb-bnb", token0: "BTCB", token1: "BNB", feeTier: 0.3, tvlUsd: 142_800_000, volume24h: 54_100_000, apr: 12.9 },
   { id: "eth-usdt", token0: "ETH", token1: "USDT", feeTier: 0.05, tvlUsd: 98_300_000, volume24h: 41_200_000, apr: 15.1 },
   { id: "usdc-usdt", token0: "USDC", token1: "USDT", feeTier: 0.01, tvlUsd: 76_500_000, volume24h: 120_900_000, apr: 6.2 },
-  { id: "ioi-eth", token0: "IOI", token1: "ETH", feeTier: 0.3, tvlUsd: 22_400_000, volume24h: 8_900_000, apr: 64.3 },
-  { id: "uni-eth", token0: "UNI", token1: "ETH", feeTier: 0.3, tvlUsd: 18_900_000, volume24h: 6_200_000, apr: 22.7 },
-  { id: "link-usdc", token0: "LINK", token1: "USDC", feeTier: 0.3, tvlUsd: 12_100_000, volume24h: 3_400_000, apr: 19.8 },
-  { id: "arb-eth", token0: "ARB", token1: "ETH", feeTier: 0.3, tvlUsd: 9_700_000, volume24h: 2_800_000, apr: 28.5 },
+  { id: "ioi-bnb", token0: "IOI", token1: "BNB", feeTier: 0.3, tvlUsd: 22_400_000, volume24h: 8_900_000, apr: 64.3 },
+  { id: "cake-bnb", token0: "CAKE", token1: "BNB", feeTier: 0.3, tvlUsd: 18_900_000, volume24h: 6_200_000, apr: 22.7 },
+  { id: "link-usdt", token0: "LINK", token1: "USDT", feeTier: 0.3, tvlUsd: 12_100_000, volume24h: 3_400_000, apr: 19.8 },
+  { id: "doge-bnb", token0: "DOGE", token1: "BNB", feeTier: 0.3, tvlUsd: 9_700_000, volume24h: 2_800_000, apr: 28.5 },
 ];
 
 export const POOL_MAP: Record<string, Pool> = Object.fromEntries(
@@ -279,13 +148,13 @@ export function seedCampaigns(): AirdropCampaign[] {
       id: "lp-bonus",
       name: "Liquidity Provider Bonus",
       description:
-        "Provide liquidity to the IOI/ETH pool to unlock this claim. Add a position from the Pools page first.",
-      tokenSymbol: "ARB",
+        "Provide liquidity to the IOI/BNB pool to unlock this claim. Add a position from the Pools page first.",
+      tokenSymbol: "IOI",
       amountPerClaim: 120,
       totalAllocation: 80_000,
       claimedCount: 540,
       eligibility: "lp",
-      requiredPoolId: "ioi-eth",
+      requiredPoolId: "ioi-bnb",
       whitelist: [],
       active: true,
       endsAt: now + 21 * DAY,

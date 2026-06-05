@@ -1,16 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { TOKENS, getToken, type ChartRange } from "@/lib/mock-data";
+import { type ChartRange } from "@/lib/mock-data";
+import { useMarketTokens } from "@/lib/market";
 import { formatCompact, formatPercent, formatUsd } from "@/lib/format";
 import { TokenLogo } from "@/components/TokenLogo";
 import { PriceChart, Sparkline } from "@/components/PriceChart";
 import { Eyebrow } from "@/components/ui";
 
 export function MarketSection() {
-  const [selected, setSelected] = useState("ETH");
+  const [selected, setSelected] = useState("BNB");
   const [range, setRange] = useState<ChartRange>("1M");
-  const token = getToken(selected)!;
+  const tokens = useMarketTokens();
+  const token = tokens.find((t) => t.symbol === selected) ?? tokens[0];
 
   return (
     <div>
@@ -66,7 +68,11 @@ export function MarketSection() {
             value={formatUsd(token.volume24h, { compact: true })}
           />
           <Metric label="24h change" value={formatPercent(token.change24h)} />
-          <Metric label="Contract" value={`${token.address.slice(0, 8)}…`} mono />
+          <Metric
+            label="Contract"
+            value={token.address ? `${token.address.slice(0, 8)}…` : "Native"}
+            mono
+          />
         </div>
       </div>
 
@@ -91,7 +97,7 @@ export function MarketSection() {
             </tr>
           </thead>
           <tbody>
-            {TOKENS.map((t, i) => (
+            {tokens.map((t, i) => (
               <tr
                 key={t.symbol}
                 onClick={() => setSelected(t.symbol)}
@@ -138,7 +144,11 @@ export function MarketSection() {
                 </td>
                 <td className="hidden px-5 py-3 sm:table-cell">
                   <div className="flex justify-end">
-                    <Sparkline symbol={t.symbol} />
+                    <Sparkline
+                      symbol={t.symbol}
+                      data={t.spark7d}
+                      up={t.change24h >= 0}
+                    />
                   </div>
                 </td>
               </tr>

@@ -1,4 +1,4 @@
-import { getToken } from "@/lib/mock-data";
+import { getToken } from "@/lib/tokens";
 
 export function TokenLogo({
   symbol,

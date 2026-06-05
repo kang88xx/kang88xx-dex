@@ -12,12 +12,9 @@ import {
   MinusCircle,
 } from "lucide-react";
 import { POOL_MAP, TOKEN_MAP } from "@/lib/mock-data";
-import {
-  useBalances,
-  useDexStore,
-  useHydrated,
-  usePositions,
-} from "@/lib/store";
+import { useDexStore, useHydrated, usePositions } from "@/lib/store";
+import { useBalances } from "@/lib/balances";
+import { useMarket } from "@/lib/market";
 import {
   formatNumber,
   formatPercent,
@@ -43,6 +40,7 @@ export default function PortfolioPage() {
   const address = useDexStore((s) => s.address);
   const { open: openWalletModal } = useAppKit();
   const balances = useBalances();
+  const market = useMarket();
   const positions = usePositions().filter((p) => POOL_MAP[p.poolId]);
   const allTransactions = useDexStore((s) => s.transactions);
   const transactions = allTransactions.filter((t) => t.address === address);
@@ -78,7 +76,10 @@ export default function PortfolioPage() {
   const tokenRows = Object.entries(balances)
     .map(([symbol, amount]) => {
       const t = TOKEN_MAP[symbol];
-      return { symbol, amount, token: t, value: amount * (t?.priceUsd ?? 0) };
+      const m = market[symbol];
+      const price = m?.priceUsd ?? t?.priceUsd ?? 0;
+      const change = m?.change24h ?? t?.change24h ?? 0;
+      return { symbol, amount, token: t, price, change, value: amount * price };
     })
     .filter((r) => r.amount > 0.000001)
     .sort((a, b) => b.value - a.value);
@@ -146,17 +147,14 @@ export default function PortfolioPage() {
                       {formatNumber(r.amount, 4)}
                     </td>
                     <td className="px-2 py-3 text-right text-[var(--muted)]">
-                      {formatUsd(r.token?.priceUsd ?? 0)}
+                      {formatUsd(r.price)}
                       <span
                         className="ml-1 text-xs"
                         style={{
-                          color:
-                            (r.token?.change24h ?? 0) >= 0
-                              ? "var(--up)"
-                              : "var(--down)",
+                          color: r.change >= 0 ? "var(--up)" : "var(--down)",
                         }}
                       >
-                        {formatPercent(r.token?.change24h ?? 0, false)}
+                        {formatPercent(r.change, false)}
                       </span>
                     </td>
                     <td className="px-5 py-3 text-right font-semibold">

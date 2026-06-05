@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
-import { TOKENS } from "@/lib/mock-data";
-import { useBalances } from "@/lib/store";
+import { TOKENS } from "@/lib/tokens";
+import { useBalances } from "@/lib/balances";
+import { useMarket } from "@/lib/market";
 import { formatNumber, formatUsd } from "@/lib/format";
 import { TokenLogo } from "./TokenLogo";
 
@@ -20,6 +21,7 @@ export function TokenSelectModal({
 }) {
   const [query, setQuery] = useState("");
   const balances = useBalances();
+  const market = useMarket();
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Focus trap: keep keyboard focus inside the dialog while it is open,
@@ -149,7 +151,7 @@ export function TokenSelectModal({
                       {formatNumber(bal, 4)}
                     </span>
                     <span className="block text-xs text-[var(--muted)]">
-                      {formatUsd(bal * t.priceUsd)}
+                      {formatUsd(bal * (market[t.symbol]?.priceUsd ?? t.priceUsd))}
                     </span>
                   </span>
                 )}

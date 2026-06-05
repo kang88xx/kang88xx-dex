@@ -3,12 +3,12 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ChevronDown, Settings2 } from "lucide-react";
 import { useAppKit } from "@reown/appkit/react";
-import { TOKEN_MAP } from "@/lib/mock-data";
-import { useBalance, useDexStore, useHydrated } from "@/lib/store";
+import { useDexStore, useHydrated } from "@/lib/store";
+import { useBalance } from "@/lib/balances";
+import { useMarket } from "@/lib/market";
 import { formatNumber, formatUsd } from "@/lib/format";
 import { TokenLogo } from "./TokenLogo";
 import { TokenSelectModal } from "./TokenSelectModal";
-import { toast } from "./toast";
 import { ArrowChip } from "./ui";
 
 const SWAP_FEE = 0.003;
@@ -17,21 +17,21 @@ export function SwapCard() {
   const hydrated = useHydrated();
   const connected = useDexStore((s) => s.connected);
   const { open: openWalletModal } = useAppKit();
-  const swap = useDexStore((s) => s.swap);
+  const market = useMarket();
 
-  const [from, setFrom] = useState("ETH");
-  const [to, setTo] = useState("USDC");
+  const [from, setFrom] = useState("BNB");
+  const [to, setTo] = useState("USDT");
   const [amount, setAmount] = useState("");
   const [picker, setPicker] = useState<null | "from" | "to">(null);
   const [slippage, setSlippage] = useState(0.5);
   const [showSettings, setShowSettings] = useState(false);
 
   const fromBal = useBalance(from);
-  const tFrom = TOKEN_MAP[from];
-  const tTo = TOKEN_MAP[to];
+  const pFrom = market[from]?.priceUsd ?? 0;
+  const pTo = market[to]?.priceUsd ?? 0;
 
   const amountNum = parseFloat(amount) || 0;
-  const rate = tFrom.priceUsd / tTo.priceUsd;
+  const rate = pTo > 0 ? pFrom / pTo : 0;
   const amountOut = useMemo(
     () => amountNum * rate * (1 - SWAP_FEE),
     [amountNum, rate],
@@ -53,18 +53,6 @@ export function SwapCard() {
     } else if (picker === "to") {
       if (symbol === from) setFrom(to);
       setTo(symbol);
-    }
-  };
-
-  const doSwap = () => {
-    const res = swap(from, to, amountNum);
-    if (res.ok) {
-      toast.success(
-        `Swapped ${formatNumber(amountNum, 4)} ${from} for ${formatNumber(res.amountOut ?? 0, 4)} ${to}`,
-      );
-      setAmount("");
-    } else {
-      toast.error(res.error ?? "Swap failed");
     }
   };
 
@@ -134,7 +122,7 @@ export function SwapCard() {
           <TokenPickerButton symbol={from} onClick={() => setPicker("from")} />
         </div>
         <div className="mt-1 text-sm text-[var(--muted)]">
-          {formatUsd(amountNum * tFrom.priceUsd)}
+          {formatUsd(amountNum * pFrom)}
         </div>
       </div>
 
@@ -158,7 +146,7 @@ export function SwapCard() {
           <TokenPickerButton symbol={to} onClick={() => setPicker("to")} />
         </div>
         <div className="mt-1 text-sm text-[var(--muted)]">
-          {formatUsd(amountOut * tTo.priceUsd)}
+          {formatUsd(amountOut * pTo)}
         </div>
       </div>
 
@@ -169,7 +157,7 @@ export function SwapCard() {
             1 {from} = {formatNumber(rate, 6)} {to}
           </Row>
           <Row label="Fee (0.3%)">
-            {formatUsd(amountNum * tFrom.priceUsd * SWAP_FEE)}
+            {formatUsd(amountNum * pFrom * SWAP_FEE)}
           </Row>
           <Row label={`Min. received (${slippage}% slippage)`}>
             {formatNumber(minReceived, 6)} {to}
@@ -191,15 +179,14 @@ export function SwapCard() {
           </button>
         ) : (
           <button
-            disabled={amountNum <= 0 || insufficient}
-            onClick={doSwap}
+            disabled
             className="flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-[var(--accent)] text-base font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--muted-2)]"
           >
             {insufficient
               ? `Insufficient ${from}`
               : amountNum <= 0
                 ? "Enter an amount"
-                : "Swap"}
+                : "On-chain swaps coming soon"}
             {!insufficient && amountNum > 0 && <ArrowChip variant="onAccent" />}
           </button>
         )}

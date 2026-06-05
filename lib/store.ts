@@ -12,29 +12,11 @@ import type {
   LmsPendingClaim,
   Transaction,
 } from "./types";
-import {
-  ADMIN_PASSWORD,
-  POOL_MAP,
-  TOKEN_MAP,
-  seedCampaigns,
-} from "./mock-data";
+import { ADMIN_PASSWORD, seedCampaigns } from "./mock-data";
 
-// Demo starting balances handed to every freshly-connected wallet
-const DEFAULT_BALANCES: Record<string, number> = {
-  ETH: 4.82,
-  WBTC: 0.182,
-  USDC: 12450,
-  USDT: 3200,
-  DAI: 800,
-  UNI: 320,
-  LINK: 540,
-  ARB: 1500,
-  AAVE: 12.4,
-  MATIC: 4200,
-  IOI: 0,
-};
-
-const SWAP_FEE = 0.003; // 0.3%
+// NOTE: token balances are no longer stored here — they are read live from
+// BSC via wagmi (see lib/balances.ts). Trade execution (swap/LP/claims/bets)
+// is disabled in the UI until the on-chain contracts ship.
 
 // ─── Last Man Standing config (exported so UI can import) ────────────────────
 export const LMS_CONFIG = {
@@ -164,8 +146,8 @@ interface DexState {
   address: string | null;
   isAdmin: boolean;
 
-  // per-address data
-  balances: Record<string, Record<string, number>>;
+  // per-address data (LP positions / airdrop claims — populated again once
+  // on-chain execution ships)
   positions: Record<string, LpPosition[]>;
   claims: Record<string, string[]>;
 
@@ -185,26 +167,10 @@ interface DexState {
   loginAdmin: (pw: string) => boolean;
   logoutAdmin: () => void;
 
-  // trading
-  swap: (
-    from: string,
-    to: string,
-    amountIn: number,
-  ) => { ok: boolean; error?: string; amountOut?: number };
-  addLiquidity: (
-    poolId: string,
-    amountUsd: number,
-  ) => { ok: boolean; error?: string };
-  removeLiquidity: (poolId: string) => { ok: boolean };
-
-  // airdrops
-  claimAirdrop: (campaignId: string) => { ok: boolean; error?: string };
-
-  // games — Last Man Standing
+  // games — Last Man Standing (bot demo rounds only; user bets/claims are
+  // disabled until the on-chain game contract ships)
   lmsEnsureRound: () => void;
-  lmsPlaceBet: (amount: number) => { ok: boolean; error?: string };
   lmsCheckExpiry: () => void;
-  lmsClaim: (claimId: string) => { ok: boolean; error?: string; payout?: number };
   lmsBotTick: () => void;
 
   // admin
@@ -217,25 +183,12 @@ interface DexState {
   removeFromWhitelist: (campaignId: string, address: string) => void;
 }
 
-function pushTx(
-  txs: Transaction[],
-  type: Transaction["type"],
-  summary: string,
-  address: string,
-): Transaction[] {
-  return [
-    { id: uid("tx_"), type, summary, timestamp: Date.now(), address },
-    ...txs,
-  ].slice(0, 60);
-}
-
 export const useDexStore = create<DexState>()(
   persist(
     (set, get) => ({
       connected: false,
       address: null,
       isAdmin: false,
-      balances: {},
       positions: {},
       claims: {},
       transactions: [],
@@ -251,13 +204,7 @@ export const useDexStore = create<DexState>()(
           set({ connected: false, address: null, isAdmin: false });
           return;
         }
-        set((s) => ({
-          connected: true,
-          address,
-          balances: s.balances[address]
-            ? s.balances
-            : { ...s.balances, [address]: { ...DEFAULT_BALANCES } },
-        }));
+        set({ connected: true, address });
       },
 
       loginAdmin: (pw) => {
@@ -269,177 +216,6 @@ export const useDexStore = create<DexState>()(
       },
 
       logoutAdmin: () => set({ isAdmin: false }),
-
-      swap: (from, to, amountIn) => {
-        const { address, balances } = get();
-        if (!address) return { ok: false, error: "Connect your wallet first" };
-        const tFrom = TOKEN_MAP[from];
-        const tTo = TOKEN_MAP[to];
-        if (!tFrom || !tTo) return { ok: false, error: "Unknown token" };
-        if (from === to) return { ok: false, error: "Select two different tokens" };
-        if (!amountIn || amountIn <= 0)
-          return { ok: false, error: "Enter an amount" };
-        const bal = balances[address]?.[from] ?? 0;
-        if (amountIn > bal) return { ok: false, error: `Insufficient ${from}` };
-
-        const amountOut =
-          ((amountIn * tFrom.priceUsd) / tTo.priceUsd) * (1 - SWAP_FEE);
-
-        set((s) => {
-          const a = { ...(s.balances[address] ?? {}) };
-          a[from] = (a[from] ?? 0) - amountIn;
-          a[to] = (a[to] ?? 0) + amountOut;
-          return {
-            balances: { ...s.balances, [address]: a },
-            transactions: pushTx(
-              s.transactions,
-              "swap",
-              `Swapped ${amountIn.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${from} → ${amountOut.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${to}`,
-              address,
-            ),
-          };
-        });
-        return { ok: true, amountOut };
-      },
-
-      addLiquidity: (poolId, amountUsd) => {
-        const { address, balances } = get();
-        if (!address) return { ok: false, error: "Connect your wallet first" };
-        const pool = POOL_MAP[poolId];
-        if (!pool) return { ok: false, error: "Unknown pool" };
-        if (!amountUsd || amountUsd <= 0)
-          return { ok: false, error: "Enter an amount" };
-
-        const t0 = TOKEN_MAP[pool.token0];
-        const t1 = TOKEN_MAP[pool.token1];
-        const perSide = amountUsd / 2;
-        const need0 = perSide / t0.priceUsd;
-        const need1 = perSide / t1.priceUsd;
-        const a = { ...(balances[address] ?? {}) };
-        if ((a[pool.token0] ?? 0) < need0)
-          return { ok: false, error: `Insufficient ${pool.token0}` };
-        if ((a[pool.token1] ?? 0) < need1)
-          return { ok: false, error: `Insufficient ${pool.token1}` };
-
-        a[pool.token0] -= need0;
-        a[pool.token1] -= need1;
-        const sharePct = (amountUsd / (pool.tvlUsd + amountUsd)) * 100;
-
-        set((s) => {
-          const existing = s.positions[address] ?? [];
-          const idx = existing.findIndex((p) => p.poolId === poolId);
-          let positions: LpPosition[];
-          if (idx >= 0) {
-            positions = existing.map((p, i) => {
-              if (i !== idx) return p;
-              const total = p.amountUsd + amountUsd;
-              return {
-                ...p,
-                amountUsd: total,
-                sharePct: (total / (pool.tvlUsd + total)) * 100,
-              };
-            });
-          } else {
-            positions = [...existing, { poolId, amountUsd, sharePct }];
-          }
-          return {
-            balances: { ...s.balances, [address]: a },
-            positions: { ...s.positions, [address]: positions },
-            transactions: pushTx(
-              s.transactions,
-              "add-liquidity",
-              `Added liquidity to ${pool.token0}/${pool.token1} ($${amountUsd.toLocaleString()})`,
-              address,
-            ),
-          };
-        });
-        return { ok: true };
-      },
-
-      removeLiquidity: (poolId) => {
-        const { address, positions, balances } = get();
-        if (!address) return { ok: false };
-        const list = positions[address] ?? [];
-        const pos = list.find((p) => p.poolId === poolId);
-        if (!pos) return { ok: false };
-        const pool = POOL_MAP[poolId];
-        if (!pool) return { ok: false };
-        const t0 = TOKEN_MAP[pool.token0];
-        const t1 = TOKEN_MAP[pool.token1];
-        const perSide = pos.amountUsd / 2;
-        const a = { ...(balances[address] ?? {}) };
-        a[pool.token0] = (a[pool.token0] ?? 0) + perSide / t0.priceUsd;
-        a[pool.token1] = (a[pool.token1] ?? 0) + perSide / t1.priceUsd;
-
-        set((s) => ({
-          balances: { ...s.balances, [address]: a },
-          positions: {
-            ...s.positions,
-            [address]: (s.positions[address] ?? []).filter(
-              (p) => p.poolId !== poolId,
-            ),
-          },
-          transactions: pushTx(
-            s.transactions,
-            "remove-liquidity",
-            `Removed liquidity from ${pool.token0}/${pool.token1}`,
-            address,
-          ),
-        }));
-        return { ok: true };
-      },
-
-      claimAirdrop: (campaignId) => {
-        const { address, campaigns, claims, positions } = get();
-        if (!address) return { ok: false, error: "Connect your wallet first" };
-        const c = campaigns.find((x) => x.id === campaignId);
-        if (!c) return { ok: false, error: "Campaign not found" };
-        if (!c.active) return { ok: false, error: "Campaign is not active" };
-        if (c.endsAt <= Date.now())
-          return { ok: false, error: "Campaign has ended" };
-        if ((c.claimedCount + 1) * c.amountPerClaim > c.totalAllocation)
-          return { ok: false, error: "Allocation fully claimed" };
-        if ((claims[address] ?? []).includes(campaignId))
-          return { ok: false, error: "Already claimed" };
-
-        if (c.eligibility === "whitelist") {
-          if (!c.whitelist.includes(address.toLowerCase()))
-            return { ok: false, error: "Wallet not whitelisted" };
-        } else if (c.eligibility === "lp") {
-          const hasLp = (positions[address] ?? []).some(
-            (p) => p.poolId === c.requiredPoolId,
-          );
-          if (!hasLp)
-            return {
-              ok: false,
-              error: "Requires a liquidity position in the linked pool",
-            };
-        }
-
-        set((s) => {
-          const a = { ...(s.balances[address] ?? {}) };
-          a[c.tokenSymbol] = (a[c.tokenSymbol] ?? 0) + c.amountPerClaim;
-          return {
-            balances: { ...s.balances, [address]: a },
-            claims: {
-              ...s.claims,
-              [address]: [...(s.claims[address] ?? []), campaignId],
-            },
-            campaigns: s.campaigns.map((x) =>
-              x.id === campaignId
-                ? { ...x, claimedCount: x.claimedCount + 1 }
-                : x,
-            ),
-            transactions: pushTx(
-              s.transactions,
-              "claim",
-              `Claimed ${c.amountPerClaim.toLocaleString()} ${c.tokenSymbol} from "${c.name}"`,
-              address,
-            ),
-          };
-        });
-        return { ok: true };
-      },
 
       // ─── Last Man Standing actions ───────────────────────────────────────
 
@@ -461,54 +237,6 @@ export const useDexStore = create<DexState>()(
         }
       },
 
-      lmsPlaceBet: (amountIn) => {
-        const { address, balances, lms } = get();
-        if (!address) return { ok: false, error: "Connect your wallet first" };
-        if (!Number.isFinite(amountIn)) return { ok: false, error: "Invalid amount" };
-        const amount = quant6(amountIn);
-        if (!amount || amount < LMS_CONFIG.MIN_BET)
-          return {
-            ok: false,
-            error: `Minimum bet is ${LMS_CONFIG.MIN_BET} USDT`,
-          };
-        const usdt = balances[address]?.USDT ?? 0;
-        if (amount > usdt) return { ok: false, error: "Insufficient USDT" };
-
-        const now = Date.now();
-        // Finalize if expired before applying bet
-        const expiredResult = finalizeRoundIfExpired(
-          lms.round,
-          lms.history,
-          lms.pendingClaims,
-          now,
-        );
-        if (expiredResult) {
-          set((s) => ({ lms: { ...s.lms, ...expiredResult } }));
-          return { ok: false, error: "Round just ended — new round started" };
-        }
-
-        if (lms.round.status !== "active")
-          return { ok: false, error: "Round is not active" };
-
-        const updatedRound = applyBetToRound(lms.round, address, amount);
-
-        set((s) => {
-          const a = { ...(s.balances[address] ?? {}) };
-          a.USDT = (a.USDT ?? 0) - amount;
-          return {
-            balances: { ...s.balances, [address]: a },
-            lms: { ...s.lms, round: updatedRound },
-            transactions: pushTx(
-              s.transactions,
-              "bet",
-              `Placed ${amount.toFixed(2)} USDT into round #${lms.round.id}`,
-              address,
-            ),
-          };
-        });
-        return { ok: true };
-      },
-
       lmsCheckExpiry: () => {
         const { lms } = get();
         const now = Date.now();
@@ -521,35 +249,6 @@ export const useDexStore = create<DexState>()(
         if (result) {
           set((s) => ({ lms: { ...s.lms, ...result } }));
         }
-      },
-
-      lmsClaim: (claimId: string) => {
-        const { address, lms } = get();
-        if (!address) return { ok: false, error: "Connect your wallet first" };
-        const claim = lms.pendingClaims.find((c) => c.id === claimId);
-        if (!claim) return { ok: false, error: "Claim not found" };
-        if (claim.address !== address) return { ok: false, error: "You are not the winner" };
-
-        const payout = claim.amount;
-
-        set((s) => {
-          const a = { ...(s.balances[address] ?? {}) };
-          a.USDT = quant6((a.USDT ?? 0) + payout);
-          return {
-            balances: { ...s.balances, [address]: a },
-            lms: {
-              ...s.lms,
-              pendingClaims: s.lms.pendingClaims.filter((c) => c.id !== claimId),
-            },
-            transactions: pushTx(
-              s.transactions,
-              "claim",
-              `Claimed ${payout.toFixed(2)} USDT from round #${claim.roundId}`,
-              address,
-            ),
-          };
-        });
-        return { ok: true, payout };
       },
 
       lmsBotTick: () => {
@@ -650,8 +349,11 @@ export const useDexStore = create<DexState>()(
       // v4: unified round finalization, pendingClaims, LMS_CONFIG export
       // v5: real wallet via Reown AppKit — connected/address now mirror wagmi
       //     and are no longer persisted here (wagmi cookie storage owns them)
+      // v6: real BSC balances via wagmi — demo balance ledger and mock trade
+      //     actions (swap/LP/claims/bets) removed
+      // v7: reseed campaigns for the BSC token/pool registry
       name: "ioi-dex-store",
-      version: 5,
+      version: 7,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) =>
         Object.fromEntries(
@@ -663,6 +365,9 @@ export const useDexStore = create<DexState>()(
         const p = persisted as Record<string, unknown>;
         delete p.connected;
         delete p.address;
+        delete p.balances;
+        // reseed campaigns — old ones reference pre-BSC tokens/pools
+        delete p.campaigns;
         return p as unknown as DexState;
       },
     },
@@ -689,21 +394,10 @@ export function useHydrated(): boolean {
 // NB: return *stable* empty references so zustand v5's Object.is snapshot
 // comparison does not trigger an infinite render loop.
 
-const EMPTY_BALANCES: Record<string, number> = {};
 const EMPTY_POSITIONS: LpPosition[] = [];
 const EMPTY_IDS: string[] = [];
 
-export function useBalances(): Record<string, number> {
-  return useDexStore((s) =>
-    s.address ? s.balances[s.address] ?? EMPTY_BALANCES : EMPTY_BALANCES,
-  );
-}
-
-export function useBalance(symbol: string): number {
-  return useDexStore((s) =>
-    s.address ? s.balances[s.address]?.[symbol] ?? 0 : 0,
-  );
-}
+// Token balances moved on-chain — see useBalances/useBalance in lib/balances.ts
 
 export function usePositions(): LpPosition[] {
   return useDexStore((s) =>

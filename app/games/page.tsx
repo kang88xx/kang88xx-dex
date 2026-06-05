@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Coins, Trophy, Clock, Flame, Users, TrendingUp } from "lucide-react";
 import { useAppKit } from "@reown/appkit/react";
-import { useDexStore, useHydrated, useBalance, LMS_CONFIG } from "@/lib/store";
+import { useDexStore, useHydrated, LMS_CONFIG } from "@/lib/store";
+import { useBalance } from "@/lib/balances";
 import { formatNumber, shortAddress, timeAgoPure } from "@/lib/format";
-import { toast } from "@/components/toast";
 import { Eyebrow } from "@/components/ui";
 import { TokenLogo } from "@/components/TokenLogo";
 
@@ -28,21 +28,17 @@ export default function GamesPage() {
   const history = useDexStore((s) => s.lms.history);
   const pendingClaims = useDexStore((s) => s.lms.pendingClaims);
   const lmsEnsureRound = useDexStore((s) => s.lmsEnsureRound);
-  const lmsPlaceBet = useDexStore((s) => s.lmsPlaceBet);
   const lmsCheckExpiry = useDexStore((s) => s.lmsCheckExpiry);
-  const lmsClaim = useDexStore((s) => s.lmsClaim);
   const lmsBotTick = useDexStore((s) => s.lmsBotTick);
   const usdt = useBalance("USDT");
 
   const [amount, setAmount] = useState("5");
   // nowMs drives both the countdown display and timeAgoPure calls — pure render
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [justBetIdx, setJustBetIdx] = useState<number | null>(null);
   const [srAnnounce, setSrAnnounce] = useState<{ id: number; message: string } | null>(null);
 
   const botTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const highlightRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const announcedExpiryRef = useRef(false);
   const prevClaimCountRef = useRef(0);
   const prevRoundIdRef = useRef<string | null>(null);
@@ -74,23 +70,10 @@ export default function GamesPage() {
     };
   }, [lmsBotTick]);
 
-  // Cleanup highlight timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (highlightRef.current) clearTimeout(highlightRef.current);
-    };
-  }, []);
-
   const parsedAmt = parseFloat(amount);
   const betAmt = Number.isFinite(parsedAmt) ? parsedAmt : 0;
   const isActive = round.status === "active";
   const overBalance = hydrated && connected && betAmt > usdt;
-  const canBet =
-    hydrated &&
-    connected &&
-    betAmt >= LMS_CONFIG.MIN_BET &&
-    !overBalance &&
-    isActive;
 
   // Pure derivations — no Date.now() in render
   const remainingMs = Math.max(0, round.endsAt - nowMs);
@@ -145,28 +128,6 @@ export default function GamesPage() {
     prevClaimCountRef.current = currentCount;
   }, [myClaims.length]);
 
-  const handlePlaceBet = () => {
-    if (!canBet) return;
-    const res = lmsPlaceBet(betAmt);
-    if (!res.ok) {
-      toast.error(res.error ?? "Bet failed");
-      return;
-    }
-    toast.success(`Bet ${betAmt.toFixed(2)} USDT placed!`);
-    setJustBetIdx(0);
-    if (highlightRef.current) clearTimeout(highlightRef.current);
-    highlightRef.current = setTimeout(() => setJustBetIdx(null), 1200);
-  };
-
-  const handleClaim = (claimId: string) => {
-    const res = lmsClaim(claimId);
-    if (!res.ok) {
-      toast.error(res.error ?? "Claim failed");
-      return;
-    }
-    toast.success(`Claimed ${res.payout!.toFixed(2)} USDT!`);
-  };
-
   const maxBet = () =>
     setAmount(usdt > 0 ? String(Math.floor(usdt)) : "0");
 
@@ -188,7 +149,7 @@ export default function GamesPage() {
                 Last Man Standing
               </h1>
               <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2.5 py-0.5 text-xs text-[var(--muted)]">
-                Prototype · mock chain
+                Demo rounds · on-chain soon
               </span>
             </div>
             <p className="text-sm text-[var(--muted)]">
@@ -306,9 +267,10 @@ export default function GamesPage() {
                         {timeAgoPure(claim.createdAt, nowMs)}
                       </span>
                       <button
-                        onClick={() => handleClaim(claim.id)}
-                        aria-label={`Claim ${claim.amount.toFixed(2)} USDT from round ${claim.roundId.slice(-4)}`}
-                        className="rounded-xl bg-[var(--up)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:opacity-90"
+                        disabled
+                        title="On-chain payouts coming soon"
+                        aria-label={`Claim ${claim.amount.toFixed(2)} USDT from round ${claim.roundId.slice(-4)} — on-chain payouts coming soon`}
+                        className="cursor-not-allowed rounded-xl bg-[var(--surface-2)] px-3 py-1.5 text-xs font-semibold text-[var(--muted-2)]"
                       >
                         Claim
                       </button>
@@ -398,8 +360,7 @@ export default function GamesPage() {
                 </button>
               ) : (
                 <button
-                  disabled={!canBet}
-                  onClick={handlePlaceBet}
+                  disabled
                   className="h-12 w-full rounded-2xl bg-[var(--accent)] font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--muted-2)]"
                 >
                   {!isActive
@@ -408,13 +369,14 @@ export default function GamesPage() {
                       ? "Insufficient USDT"
                       : betAmt < LMS_CONFIG.MIN_BET
                         ? `Minimum ${LMS_CONFIG.MIN_BET} USDT`
-                        : `Place Your Bet · ${betAmt.toFixed(2)} USDT`}
+                        : "On-chain game coming soon"}
                 </button>
               )}
             </div>
 
             <p className="mt-3 text-center text-[11px] text-[var(--muted-2)]">
-              No randomness · last bettor wins the pool · prototype only
+              No randomness · last bettor wins the pool · on-chain version
+              coming soon
             </p>
           </div>
 
@@ -487,16 +449,10 @@ export default function GamesPage() {
                   <span>Amount</span>
                   <span>Rd</span>
                 </div>
-                {round.bets.slice(0, 12).map((bet, i) => (
+                {round.bets.slice(0, 12).map((bet) => (
                   <div
                     key={bet.id}
                     className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-center rounded-xl px-2 py-1.5 text-xs transition-colors"
-                    style={{
-                      backgroundColor:
-                        i === justBetIdx
-                          ? "color-mix(in srgb, var(--accent) 12%, transparent)"
-                          : "transparent",
-                    }}
                   >
                     <span className="text-[var(--muted)]">
                       {timeAgoPure(bet.timestamp, nowMs)}

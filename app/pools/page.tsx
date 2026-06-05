@@ -3,21 +3,15 @@
 import { useState } from "react";
 import { Plus, Minus, Droplets } from "lucide-react";
 import { POOLS, POOL_MAP } from "@/lib/mock-data";
-import {
-  useDexStore,
-  useHydrated,
-  usePositions,
-} from "@/lib/store";
+import { useHydrated, usePositions } from "@/lib/store";
 import { formatCompact, formatUsd } from "@/lib/format";
 import { TokenPair } from "@/components/TokenLogo";
 import { AddLiquidityModal } from "@/components/AddLiquidityModal";
-import { toast } from "@/components/toast";
 import { Eyebrow } from "@/components/ui";
 
 export default function PoolsPage() {
   const hydrated = useHydrated();
   const positions = usePositions();
-  const removeLiquidity = useDexStore((s) => s.removeLiquidity);
   const [addPool, setAddPool] = useState<string | null>(null);
 
   // Ignore any persisted positions whose pool no longer exists.
@@ -76,13 +70,9 @@ export default function PoolsPage() {
                       </div>
                     </div>
                     <button
-                      onClick={() => {
-                        removeLiquidity(p.poolId);
-                        toast.success(
-                          `Removed liquidity from ${pool.token0}/${pool.token1}`,
-                        );
-                      }}
-                      className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--card)]"
+                      disabled
+                      title="On-chain pools coming soon"
+                      className="inline-flex cursor-not-allowed items-center gap-1 rounded-full border border-[var(--border-strong)] px-3 py-1.5 text-xs font-medium text-[var(--muted-2)]"
                     >
                       <Minus className="h-3.5 w-3.5" />
                       Remove

@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Plus } from "lucide-react";
 import { useAppKit } from "@reown/appkit/react";
-import { POOL_MAP, TOKEN_MAP } from "@/lib/mock-data";
-import { useBalances, useDexStore, useHydrated } from "@/lib/store";
+import { POOL_MAP } from "@/lib/mock-data";
+import { useDexStore, useHydrated } from "@/lib/store";
+import { useBalances } from "@/lib/balances";
+import { useMarket } from "@/lib/market";
 import { formatNumber, formatUsd } from "@/lib/format";
 import { TokenLogo } from "./TokenLogo";
-import { toast } from "./toast";
 
 export function AddLiquidityModal({
   poolId,
@@ -19,7 +20,7 @@ export function AddLiquidityModal({
   const hydrated = useHydrated();
   const connected = useDexStore((s) => s.connected);
   const { open: openWalletModal } = useAppKit();
-  const addLiquidity = useDexStore((s) => s.addLiquidity);
+  const market = useMarket();
   const balances = useBalances();
   const [amount, setAmount] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
@@ -74,27 +75,16 @@ export function AddLiquidityModal({
   const pool = POOL_MAP[poolId];
   if (!pool) return null;
 
-  const t0 = TOKEN_MAP[pool.token0];
-  const t1 = TOKEN_MAP[pool.token1];
+  const p0 = market[pool.token0]?.priceUsd ?? 0;
+  const p1 = market[pool.token1]?.priceUsd ?? 0;
   const usd = parseFloat(amount) || 0;
   const perSide = usd / 2;
-  const need0 = perSide / t0.priceUsd;
-  const need1 = perSide / t1.priceUsd;
+  const need0 = p0 > 0 ? perSide / p0 : 0;
+  const need1 = p1 > 0 ? perSide / p1 : 0;
 
   const bal0 = balances[pool.token0] ?? 0;
   const bal1 = balances[pool.token1] ?? 0;
   const enough = need0 <= bal0 && need1 <= bal1;
-
-  const submit = () => {
-    const res = addLiquidity(poolId, usd);
-    if (res.ok) {
-      toast.success(`Added ${formatUsd(usd)} to ${pool.token0}/${pool.token1}`);
-      setAmount("");
-      onClose();
-    } else {
-      toast.error(res.error ?? "Failed to add liquidity");
-    }
-  };
 
   return (
     <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 p-4 pt-24">
@@ -185,15 +175,14 @@ export function AddLiquidityModal({
               </button>
             ) : (
               <button
-                disabled={usd <= 0 || !enough}
-                onClick={submit}
+                disabled
                 className="h-12 w-full rounded-2xl bg-[var(--accent)] font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--muted-2)]"
               >
                 {usd <= 0
                   ? "Enter an amount"
                   : !enough
                     ? "Insufficient balance"
-                    : "Add liquidity"}
+                    : "On-chain pools coming soon"}
               </button>
             )}
           </div>
