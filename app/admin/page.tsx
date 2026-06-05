@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ShieldCheck,
   Lock,
@@ -28,11 +29,24 @@ const DAY = 1000 * 60 * 60 * 24;
 const INPUT =
   "w-full rounded-xl border border-[var(--border-strong)] bg-[var(--card)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]";
 
+/** Server-verified admin session (HTTP-only cookie, see /api/admin/*) */
+function useAdminSession() {
+  return useQuery<{ isAdmin: boolean }>({
+    queryKey: ["admin-session"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/session");
+      if (!res.ok) return { isAdmin: false };
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+}
+
 export default function AdminPage() {
   const hydrated = useHydrated();
-  const isAdmin = useDexStore((s) => s.isAdmin);
+  const { data: session, isLoading } = useAdminSession();
 
-  if (!hydrated) {
+  if (!hydrated || isLoading) {
     return (
       <div className="mx-auto max-w-md px-4 py-24">
         <div className="h-72 rounded-3xl bg-[var(--surface-2)] animate-pulse-soft" />
@@ -40,20 +54,38 @@ export default function AdminPage() {
     );
   }
 
-  return isAdmin ? <AdminDashboard /> : <AdminLogin />;
+  return session?.isAdmin ? <AdminDashboard /> : <AdminLogin />;
 }
 
 function AdminLogin() {
-  const loginAdmin = useDexStore((s) => s.loginAdmin);
+  const queryClient = useQueryClient();
   const [pw, setPw] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loginAdmin(pw)) {
-      toast.success("Admin access granted");
-    } else {
-      toast.error("Incorrect password");
-      setPw("");
+    if (!pw || submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pw }),
+      });
+      if (res.ok) {
+        toast.success("Admin access granted");
+        await queryClient.invalidateQueries({ queryKey: ["admin-session"] });
+      } else {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        toast.error(body?.error ?? "Login failed");
+        setPw("");
+      }
+    } catch {
+      toast.error("Login failed — network error");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -76,21 +108,25 @@ function AdminLogin() {
         />
         <button
           type="submit"
-          className="mt-3 w-full rounded-2xl bg-[var(--accent)] py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
+          disabled={submitting}
+          className="mt-3 w-full rounded-2xl bg-[var(--accent)] py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Unlock
+          {submitting ? "Checking…" : "Unlock"}
         </button>
       </form>
-      <p className="mt-4 text-xs text-[var(--muted-2)]">
-        Demo password: <span className="font-mono">admin123</span>
-      </p>
     </div>
   );
 }
 
 function AdminDashboard() {
   const campaigns = useDexStore((s) => s.campaigns);
-  const logoutAdmin = useDexStore((s) => s.logoutAdmin);
+  const queryClient = useQueryClient();
+
+  const logout = async () => {
+    await fetch("/api/admin/logout", { method: "POST" }).catch(() => {});
+    toast.info("Logged out of admin");
+    await queryClient.invalidateQueries({ queryKey: ["admin-session"] });
+  };
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
@@ -111,10 +147,7 @@ function AdminDashboard() {
           </div>
         </div>
         <button
-          onClick={() => {
-            logoutAdmin();
-            toast.info("Logged out of admin");
-          }}
+          onClick={logout}
           className="inline-flex items-center gap-2 rounded-full border border-[var(--border-strong)] px-4 py-2 text-sm font-medium transition-colors hover:bg-[var(--surface)]"
         >
           <LogOut className="h-4 w-4" />

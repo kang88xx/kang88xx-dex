@@ -163,4 +163,5 @@ export function seedCampaigns(): AirdropCampaign[] {
   ];
 }
 
-export const ADMIN_PASSWORD = "admin123";
+// Admin auth moved server-side — see lib/admin-auth.ts + /api/admin/* routes.
+// Set ADMIN_PASSWORD and ADMIN_SESSION_SECRET in .env.local.

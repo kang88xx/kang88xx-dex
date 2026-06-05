@@ -12,7 +12,7 @@ import type {
   LmsPendingClaim,
   Transaction,
 } from "./types";
-import { ADMIN_PASSWORD, seedCampaigns } from "./mock-data";
+import { seedCampaigns } from "./mock-data";
 
 // NOTE: token balances are no longer stored here — they are read live from
 // BSC via wagmi (see lib/balances.ts). Trade execution (swap/LP/claims/bets)
@@ -144,7 +144,6 @@ interface DexState {
   // wallet
   connected: boolean;
   address: string | null;
-  isAdmin: boolean;
 
   // per-address data (LP positions / airdrop claims — populated again once
   // on-chain execution ships)
@@ -164,8 +163,6 @@ interface DexState {
   // wallet actions
   /** Mirror the real wagmi/AppKit session into the store (null = disconnected). */
   setWalletSession: (address: string | null) => void;
-  loginAdmin: (pw: string) => boolean;
-  logoutAdmin: () => void;
 
   /** Record a confirmed on-chain transaction for the activity feed. */
   recordTransaction: (type: Transaction["type"], summary: string) => void;
@@ -191,7 +188,6 @@ export const useDexStore = create<DexState>()(
     (set, get) => ({
       connected: false,
       address: null,
-      isAdmin: false,
       positions: {},
       claims: {},
       transactions: [],
@@ -204,21 +200,11 @@ export const useDexStore = create<DexState>()(
 
       setWalletSession: (address) => {
         if (!address) {
-          set({ connected: false, address: null, isAdmin: false });
+          set({ connected: false, address: null });
           return;
         }
         set({ connected: true, address });
       },
-
-      loginAdmin: (pw) => {
-        if (pw === ADMIN_PASSWORD) {
-          set({ isAdmin: true });
-          return true;
-        }
-        return false;
-      },
-
-      logoutAdmin: () => set({ isAdmin: false }),
 
       recordTransaction: (type, summary) =>
         set((s) => ({
