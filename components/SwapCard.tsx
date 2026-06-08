@@ -155,6 +155,7 @@ export function SwapCard() {
         abi: erc20Abi,
         functionName: "approve",
         args: [PANCAKE_ROUTER, maxUint256],
+        chainId: BSC_CHAIN_ID,
       });
       await settleTx(hash, () => toast.success(`${from} approved for trading`));
     } catch {
@@ -166,6 +167,9 @@ export function SwapCard() {
 
   const handleSwap = async () => {
     if (!address || quote.amountOutWei <= 0n || quote.path.length === 0) return;
+    // W1: never submit a swap whose slippage-adjusted minimum rounds to 0,
+    // which would leave the trade with no on-chain output protection.
+    if (minOutWei <= 0n) return;
     setPendingAction("swap");
     const deadline = swapDeadline();
     const summary = `Swapped ${formatNumber(amountNum, 4)} ${from} → ${formatNumber(amountOut, 4)} ${to}`;
@@ -178,6 +182,7 @@ export function SwapCard() {
           functionName: "swapExactETHForTokens",
           args: [minOutWei, quote.path, address, deadline],
           value: quote.amountInWei,
+          chainId: BSC_CHAIN_ID,
         });
       } else if (to === "BNB") {
         hash = await writeContractAsync({
@@ -185,6 +190,7 @@ export function SwapCard() {
           abi: PANCAKE_ROUTER_ABI,
           functionName: "swapExactTokensForETH",
           args: [quote.amountInWei, minOutWei, quote.path, address, deadline],
+          chainId: BSC_CHAIN_ID,
         });
       } else {
         hash = await writeContractAsync({
@@ -192,6 +198,7 @@ export function SwapCard() {
           abi: PANCAKE_ROUTER_ABI,
           functionName: "swapExactTokensForTokens",
           args: [quote.amountInWei, minOutWei, quote.path, address, deadline],
+          chainId: BSC_CHAIN_ID,
         });
       }
       await settleTx(hash, () => {
@@ -213,7 +220,8 @@ export function SwapCard() {
     insufficient ||
     untradableSide !== null ||
     quote.noRoute ||
-    (!needsApproval && quote.amountOutWei <= 0n);
+    quote.isLoading || // W3: don't act on a quote that is still resolving
+    (!needsApproval && (quote.amountOutWei <= 0n || minOutWei <= 0n)); // W1
 
   return (
     <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-2 shadow-xl shadow-black/[0.03]">

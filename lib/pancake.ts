@@ -184,9 +184,17 @@ export function useSwapQuote(
   }, [enabled, data, isLoading, amountInWei, paths, toToken]);
 }
 
+/** Max user-selectable slippage (percent). Guards against negative minOut. */
+export const MAX_SLIPPAGE_PCT = 5;
+
 /** amountOutMin after applying slippage (percent, e.g. 0.5) */
 export function applySlippage(amountOutWei: bigint, slippagePct: number): bigint {
-  const bps = BigInt(Math.round(slippagePct * 100)); // 0.5% → 50 bps
+  // Clamp to [0, MAX_SLIPPAGE_PCT] and reject NaN so bps can never exceed
+  // 10_000 (which would make 10_000n - bps negative → unbounded minOut loss).
+  const safePct = Number.isFinite(slippagePct)
+    ? Math.min(Math.max(slippagePct, 0), MAX_SLIPPAGE_PCT)
+    : 0;
+  const bps = BigInt(Math.round(safePct * 100)); // 0.5% → 50 bps
   return (amountOutWei * (10_000n - bps)) / 10_000n;
 }
 
