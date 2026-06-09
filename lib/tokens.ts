@@ -26,6 +26,7 @@ const MAINNET_TOKENS: Token[] = [
     volume24h: 1_800_000_000,
     marketCap: 88_000_000_000,
     color: "#f3ba2f",
+    logoUrl: "/tokens/BNB.png",
   },
   {
     symbol: "USDT",
@@ -38,6 +39,7 @@ const MAINNET_TOKENS: Token[] = [
     volume24h: 28_000_000_000,
     marketCap: 110_000_000_000,
     color: "#26a17b",
+    logoUrl: "/tokens/USDT.png",
   },
   {
     symbol: "USDC",
@@ -177,6 +179,7 @@ const TESTNET_TOKENS: Token[] = [
     volume24h: 0,
     marketCap: 0,
     color: "#f3ba2f",
+    logoUrl: "/tokens/BNB.png",
   },
   ...(TESTNET_USDT
     ? [
@@ -191,6 +194,7 @@ const TESTNET_TOKENS: Token[] = [
           volume24h: 0,
           marketCap: 0,
           color: "#26a17b",
+          logoUrl: "/tokens/USDT.png",
         } satisfies Token,
       ]
     : []),
