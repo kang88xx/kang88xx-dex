@@ -15,10 +15,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useDexStore, useHydrated } from "@/lib/store";
 import { useBalance } from "@/lib/balances";
 import { useMarket } from "@/lib/market";
-import { TOKEN_MAP } from "@/lib/tokens";
+import { useTokenRegistry, tokenTradable } from "@/lib/token-registry";
 import {
   applySlippage,
-  isTradable,
   PANCAKE_FEE,
   PANCAKE_ROUTER,
   PANCAKE_ROUTER_ABI,
@@ -61,7 +60,8 @@ export function SwapCard() {
     null,
   );
 
-  const fromToken = TOKEN_MAP[from];
+  const { map: tokenMap } = useTokenRegistry();
+  const fromToken = tokenMap[from];
   const isFromNative = from === "BNB";
   const fromBal = useBalance(from);
   const pFrom = market[from]?.priceUsd ?? 0;
@@ -84,7 +84,11 @@ export function SwapCard() {
   const insufficient = hydrated && connected && amountNum > fromBal;
   const wrongChain =
     connected && chainId !== undefined && chainId !== BSC_CHAIN_ID;
-  const untradableSide = !isTradable(from) ? from : !isTradable(to) ? to : null;
+  const untradableSide = !tokenTradable(tokenMap[from])
+    ? from
+    : !tokenTradable(tokenMap[to])
+      ? to
+      : null;
 
   // Router allowance for ERC-20 inputs (native BNB needs none)
   const { data: allowance } = useReadContract({

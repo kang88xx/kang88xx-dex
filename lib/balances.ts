@@ -7,7 +7,8 @@ import {
   useBalance as useNativeBalance,
   useReadContracts,
 } from "wagmi";
-import { ERC20_TOKENS } from "./tokens";
+import { useTokenRegistry } from "./token-registry";
+import type { Token } from "./types";
 
 const REFETCH_MS = 30_000;
 const EMPTY: Record<string, number> = {};
@@ -19,6 +20,16 @@ const EMPTY: Record<string, number> = {};
  */
 export function useBalances(): Record<string, number> {
   const { address, isConnected } = useAccount();
+  const { enabled: registryTokens } = useTokenRegistry();
+
+  // ERC-20 tokens with a real contract (static registry + admin-added)
+  const erc20Tokens = useMemo(
+    () =>
+      registryTokens.filter(
+        (t): t is Token & { address: string } => t.address !== null,
+      ),
+    [registryTokens],
+  );
 
   const native = useNativeBalance({
     address,
@@ -26,7 +37,7 @@ export function useBalances(): Record<string, number> {
   });
 
   const erc20 = useReadContracts({
-    contracts: ERC20_TOKENS.map((t) => ({
+    contracts: erc20Tokens.map((t) => ({
       address: t.address as `0x${string}`,
       abi: erc20Abi,
       functionName: "balanceOf" as const,
@@ -42,13 +53,13 @@ export function useBalances(): Record<string, number> {
       out.BNB = Number(formatUnits(native.data.value, native.data.decimals));
     }
     erc20.data?.forEach((r, i) => {
-      const t = ERC20_TOKENS[i];
+      const t = erc20Tokens[i];
       if (r.status === "success") {
         out[t.symbol] = Number(formatUnits(r.result as bigint, t.decimals));
       }
     });
     return out;
-  }, [isConnected, address, native.data, erc20.data]);
+  }, [isConnected, address, native.data, erc20.data, erc20Tokens]);
 }
 
 /** On-chain balance for one token symbol (0 while disconnected/loading). */

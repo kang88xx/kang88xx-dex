@@ -2,10 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
-import { TOKENS } from "@/lib/tokens";
+import { useTokenRegistry } from "@/lib/token-registry";
 import { useBalances } from "@/lib/balances";
 import { useMarket } from "@/lib/market";
-import { isTradable } from "@/lib/pancake";
 import { formatNumber, formatUsd } from "@/lib/format";
 import { TokenLogo } from "./TokenLogo";
 
@@ -26,6 +25,7 @@ export function TokenSelectModal({
   const [query, setQuery] = useState("");
   const balances = useBalances();
   const market = useMarket();
+  const { enabled, tradable } = useTokenRegistry();
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Focus trap: keep keyboard focus inside the dialog while it is open,
@@ -76,9 +76,9 @@ export function TokenSelectModal({
 
   if (!open) return null;
 
-  const filtered = TOKENS.filter((t) => {
+  const source = tradableOnly ? tradable : enabled;
+  const filtered = source.filter((t) => {
     if (t.symbol === exclude) return false;
-    if (tradableOnly && !isTradable(t.symbol)) return false;
     const q = query.toLowerCase();
     return (
       t.symbol.toLowerCase().includes(q) || t.name.toLowerCase().includes(q)

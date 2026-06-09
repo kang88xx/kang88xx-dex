@@ -11,9 +11,11 @@ import {
   UserPlus,
   X,
   Power,
+  Coins,
 } from "lucide-react";
 import { POOLS, TOKENS } from "@/lib/mock-data";
 import { useDexStore, useHydrated } from "@/lib/store";
+import { useTokenRegistry, tokenTradable } from "@/lib/token-registry";
 import {
   daysUntil,
   formatUsd,
@@ -171,6 +173,182 @@ function AdminDashboard() {
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      <div className="mt-10">
+        <SwapTokensManager />
+      </div>
+    </div>
+  );
+}
+
+/** Admin control of which tokens are swappable + adding custom tokens. */
+function SwapTokensManager() {
+  const { all } = useTokenRegistry();
+  const adminTokens = useDexStore((s) => s.adminTokens);
+  const disabledTokens = useDexStore((s) => s.disabledTokens);
+  const addAdminToken = useDexStore((s) => s.addAdminToken);
+  const removeAdminToken = useDexStore((s) => s.removeAdminToken);
+  const setTokenEnabled = useDexStore((s) => s.setTokenEnabled);
+
+  const [symbol, setSymbol] = useState("");
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [decimals, setDecimals] = useState("18");
+
+  const adminSymbols = new Set(adminTokens.map((t) => t.symbol));
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const sym = symbol.trim().toUpperCase();
+    const addr = address.trim();
+    const dec = parseInt(decimals, 10);
+    if (!sym) return toast.error("Enter a token symbol");
+    if (all.some((t) => t.symbol === sym))
+      return toast.error(`${sym} already exists`);
+    if (!/^0x[a-fA-F0-9]{40}$/.test(addr))
+      return toast.error("Invalid BSC contract address");
+    if (!Number.isInteger(dec) || dec < 0 || dec > 36)
+      return toast.error("Decimals must be 0–36");
+
+    addAdminToken({
+      symbol: sym,
+      name: name.trim() || sym,
+      address: addr,
+      decimals: dec,
+      color: "#6366f1",
+    });
+    toast.success(`Added ${sym} to the swap list`);
+    setSymbol("");
+    setName("");
+    setAddress("");
+    setDecimals("18");
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-5">
+      {/* Add custom token */}
+      <form
+        onSubmit={submit}
+        className="lg:col-span-2 h-fit rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5"
+      >
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
+          <Coins className="h-4 w-4 text-[var(--accent)]" />
+          Add swap token
+        </h2>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          Add a token by contract address to make it swappable. On testnet, use
+          your deployed test-token address.
+        </p>
+
+        <div className="mt-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Symbol">
+              <input
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value)}
+                placeholder="USDT"
+                className={INPUT}
+              />
+            </Field>
+            <Field label="Decimals">
+              <input
+                type="number"
+                value={decimals}
+                onChange={(e) => setDecimals(e.target.value)}
+                className={INPUT}
+              />
+            </Field>
+          </div>
+          <Field label="Name">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Test Tether"
+              className={INPUT}
+            />
+          </Field>
+          <Field label="Contract address">
+            <input
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="0x…"
+              className={`${INPUT} font-mono`}
+            />
+          </Field>
+        </div>
+
+        <button
+          type="submit"
+          className="mt-5 w-full rounded-2xl bg-[var(--accent)] py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
+        >
+          Add token
+        </button>
+      </form>
+
+      {/* Token list with enable/disable */}
+      <div className="lg:col-span-3">
+        <h2 className="mb-3 text-sm font-semibold">
+          Swap tokens ({all.filter((t) => !disabledTokens.includes(t.symbol)).length}{" "}
+          enabled)
+        </h2>
+        <div className="space-y-2">
+          {all.map((t) => {
+            const enabled = !disabledTokens.includes(t.symbol);
+            const custom = adminSymbols.has(t.symbol);
+            return (
+              <div
+                key={t.symbol}
+                className="flex items-center justify-between rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <TokenLogo symbol={t.symbol} size={34} />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold">{t.symbol}</span>
+                      {custom && (
+                        <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-medium text-[var(--accent)]">
+                          Custom
+                        </span>
+                      )}
+                      {!tokenTradable(t) && (
+                        <span className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)]">
+                          No contract
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-mono text-xs text-[var(--muted)]">
+                      {t.address ? shortAddress(t.address) : "native"}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setTokenEnabled(t.symbol, !enabled)}
+                    title={enabled ? "Disable for swapping" : "Enable for swapping"}
+                    className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-[var(--surface)] ${
+                      enabled ? "text-[var(--up)]" : "text-[var(--muted-2)]"
+                    }`}
+                  >
+                    <Power className="h-4 w-4" />
+                  </button>
+                  {custom && (
+                    <button
+                      onClick={() => {
+                        removeAdminToken(t.symbol);
+                        toast.info(`Removed ${t.symbol}`);
+                      }}
+                      title="Remove custom token"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--down)] transition-colors hover:bg-[var(--down-soft)]"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

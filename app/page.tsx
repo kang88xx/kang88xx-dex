@@ -3,6 +3,15 @@ import { ArrowUpRight } from "lucide-react";
 import { SwapCard } from "@/components/SwapCard";
 import { MarketSection } from "@/components/MarketSection";
 import { PerspectiveGrid } from "@/components/PerspectiveGrid";
+import { POOLS } from "@/lib/mock-data";
+import { CHAIN_LABEL } from "@/lib/chain";
+import { formatUsd } from "@/lib/format";
+
+// Ticker stats derived from the app's own liquidity-pool registry (not
+// hardcoded). When real on-chain pools ship, these follow automatically.
+const TVL_USD = POOLS.reduce((sum, p) => sum + p.tvlUsd, 0);
+const VOL_24H_USD = POOLS.reduce((sum, p) => sum + p.volume24h, 0);
+const PAIR_COUNT = POOLS.length;
 
 export default function Home() {
   return (
@@ -14,7 +23,7 @@ export default function Home() {
           <div className="flex flex-wrap items-center gap-3">
             <span className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card)] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.06em] text-[var(--muted)]">
               <span className="h-1.5 w-1.5 bg-[var(--dot-yellow)]" />
-              Live on BNB Smart Chain
+              Live on {CHAIN_LABEL}
             </span>
             <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted-2)]">
               Innovate · Own · Inspire
@@ -22,11 +31,17 @@ export default function Home() {
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <div className="flex items-center gap-x-5">
-              <InlineStat label="24h Vol" value="$1.2B" />
+              <InlineStat
+                label="24h Vol"
+                value={formatUsd(VOL_24H_USD, { compact: true })}
+              />
               <span className="text-[var(--border-strong)]">·</span>
-              <InlineStat label="TVL" value="$564M" />
+              <InlineStat
+                label="TVL"
+                value={formatUsd(TVL_USD, { compact: true })}
+              />
               <span className="text-[var(--border-strong)]">·</span>
-              <InlineStat label="Pairs" value="3,400+" />
+              <InlineStat label="Pairs" value={String(PAIR_COUNT)} />
             </div>
             <Link
               href="/airdrop"

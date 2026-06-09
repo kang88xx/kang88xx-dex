@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { useSyncExternalStore } from "react";
 import type {
+  AdminToken,
   AirdropCampaign,
   LpPosition,
   LmsBet,
@@ -153,6 +154,10 @@ interface DexState {
   transactions: Transaction[];
   campaigns: AirdropCampaign[];
 
+  // admin-managed swap token registry (merged with the static registry)
+  adminTokens: AdminToken[];
+  disabledTokens: string[]; // symbols hidden from swapping
+
   // Last Man Standing
   lms: {
     round: LmsRound;
@@ -181,6 +186,11 @@ interface DexState {
   deleteCampaign: (id: string) => void;
   addToWhitelist: (campaignId: string, address: string) => void;
   removeFromWhitelist: (campaignId: string, address: string) => void;
+
+  // admin — swap token registry
+  addAdminToken: (token: AdminToken) => void;
+  removeAdminToken: (symbol: string) => void;
+  setTokenEnabled: (symbol: string, enabled: boolean) => void;
 }
 
 export const useDexStore = create<DexState>()(
@@ -192,6 +202,8 @@ export const useDexStore = create<DexState>()(
       claims: {},
       transactions: [],
       campaigns: seedCampaigns(),
+      adminTokens: [],
+      disabledTokens: [],
       lms: {
         round: makeFreshRound(Date.now()),
         history: [],
@@ -345,6 +357,37 @@ export const useDexStore = create<DexState>()(
               : c,
           ),
         })),
+
+      addAdminToken: (token) =>
+        set((s) => {
+          const symbol = token.symbol.trim().toUpperCase();
+          if (!symbol || s.adminTokens.some((t) => t.symbol === symbol)) {
+            return s;
+          }
+          return {
+            adminTokens: [
+              ...s.adminTokens,
+              { ...token, symbol, address: token.address.trim() },
+            ],
+            // a freshly added token is enabled by default
+            disabledTokens: s.disabledTokens.filter((sym) => sym !== symbol),
+          };
+        }),
+
+      removeAdminToken: (symbol) =>
+        set((s) => ({
+          adminTokens: s.adminTokens.filter((t) => t.symbol !== symbol),
+          disabledTokens: s.disabledTokens.filter((sym) => sym !== symbol),
+        })),
+
+      setTokenEnabled: (symbol, enabled) =>
+        set((s) => ({
+          disabledTokens: enabled
+            ? s.disabledTokens.filter((sym) => sym !== symbol)
+            : s.disabledTokens.includes(symbol)
+              ? s.disabledTokens
+              : [...s.disabledTokens, symbol],
+        })),
     }),
     {
       // bumped from helix-dex-store → reseeds with IOI tokens/campaigns
@@ -355,8 +398,9 @@ export const useDexStore = create<DexState>()(
       // v6: real BSC balances via wagmi — demo balance ledger and mock trade
       //     actions (swap/LP/claims/bets) removed
       // v7: reseed campaigns for the BSC token/pool registry
+      // v8: admin-managed swap token registry (adminTokens / disabledTokens)
       name: "ioi-dex-store",
-      version: 7,
+      version: 8,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) =>
         Object.fromEntries(

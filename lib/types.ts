@@ -34,6 +34,15 @@ export interface Pool {
   apr: number; // percent
 }
 
+/** Admin-added custom swap token (persisted client-side, merged into the registry) */
+export interface AdminToken {
+  symbol: string;
+  name: string;
+  address: string; // BSC contract — required so it is swappable
+  decimals: number;
+  color: string; // logo background color
+}
+
 export type Eligibility = "public" | "whitelist" | "lp";
 
 export interface AirdropCampaign {

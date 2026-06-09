@@ -5,6 +5,8 @@ import { formatUnits, parseUnits } from "viem";
 import { useReadContracts } from "wagmi";
 import { TOKEN_MAP } from "./tokens";
 import { PANCAKE_ROUTER, WBNB } from "./chain";
+import { useTokenRegistry, tokenTradable } from "./token-registry";
+import type { Token } from "./types";
 
 // PancakeSwap V2 Router02 + WBNB — resolved per active network in lib/chain.ts.
 export { PANCAKE_ROUTER, WBNB };
@@ -65,13 +67,15 @@ export const PANCAKE_ROUTER_ABI = [
 
 /** A token is swappable if it has a BSC contract or is native BNB. */
 export function isTradable(symbol: string): boolean {
-  const t = TOKEN_MAP[symbol];
-  return !!t && (t.address !== null || t.symbol === "BNB");
+  return tokenTradable(TOKEN_MAP[symbol]);
 }
 
 /** Registry symbol → address used in router paths (BNB → WBNB). */
-function pathAddress(symbol: string): `0x${string}` | null {
-  const t = TOKEN_MAP[symbol];
+function pathAddress(
+  symbol: string,
+  map: Record<string, Token>,
+): `0x${string}` | null {
+  const t = map[symbol];
   if (!t) return null;
   if (t.symbol === "BNB") return WBNB;
   return t.address as `0x${string}` | null;
@@ -80,13 +84,15 @@ function pathAddress(symbol: string): `0x${string}` | null {
 /**
  * Candidate router paths for a pair: the direct pair and (for token↔token)
  * the WBNB hop. The quote hook asks for both and keeps the better one.
+ * `map` is the effective token registry (static + admin tokens).
  */
 export function buildPaths(
   fromSymbol: string,
   toSymbol: string,
+  map: Record<string, Token>,
 ): `0x${string}`[][] {
-  const a = pathAddress(fromSymbol);
-  const b = pathAddress(toSymbol);
+  const a = pathAddress(fromSymbol, map);
+  const b = pathAddress(toSymbol, map);
   if (!a || !b || a === b) return [];
   const paths: `0x${string}`[][] = [[a, b]];
   if (a !== WBNB && b !== WBNB) paths.push([a, WBNB, b]);
@@ -123,8 +129,9 @@ export function useSwapQuote(
   toSymbol: string,
   amountIn: string,
 ): SwapQuote {
-  const fromToken = TOKEN_MAP[fromSymbol];
-  const toToken = TOKEN_MAP[toSymbol];
+  const { map } = useTokenRegistry();
+  const fromToken = map[fromSymbol];
+  const toToken = map[toSymbol];
 
   let amountInWei = 0n;
   try {
@@ -136,8 +143,8 @@ export function useSwapQuote(
   }
 
   const paths = useMemo(
-    () => buildPaths(fromSymbol, toSymbol),
-    [fromSymbol, toSymbol],
+    () => buildPaths(fromSymbol, toSymbol, map),
+    [fromSymbol, toSymbol, map],
   );
 
   const enabled = amountInWei > 0n && paths.length > 0;

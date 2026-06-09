@@ -11,6 +11,7 @@ import { GlyphX } from "./IOILogo";
 const LINKS = [
   { href: "/", label: "Swap" },
   { href: "/pools", label: "Pools" },
+  { href: "/bridge", label: "Bridge" },
   { href: "/staking", label: "Staking" },
   { href: "/airdrop", label: "Airdrop" },
   { href: "/games", label: "Games" },

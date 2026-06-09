@@ -22,7 +22,10 @@ export function AddLiquidityModal({
   const { open: openWalletModal } = useAppKit();
   const market = useMarket();
   const balances = useBalances();
-  const [amount, setAmount] = useState("");
+  // Token-amount inputs (not a single USD total): typing one side fills the
+  // other at the pool ratio so the two deposits stay equal in value.
+  const [amount0, setAmount0] = useState("");
+  const [amount1, setAmount1] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Focus trap: keep keyboard focus inside the dialog while it is open,
@@ -77,14 +80,39 @@ export function AddLiquidityModal({
 
   const p0 = market[pool.token0]?.priceUsd ?? 0;
   const p1 = market[pool.token1]?.priceUsd ?? 0;
-  const usd = parseFloat(amount) || 0;
-  const perSide = usd / 2;
-  const need0 = p0 > 0 ? perSide / p0 : 0;
-  const need1 = p1 > 0 ? perSide / p1 : 0;
+  // pool ratio: how many token1 per 1 token0 (equal USD value on both sides)
+  const ratio01 = p0 > 0 && p1 > 0 ? p0 / p1 : 0;
+
+  const n0 = parseFloat(amount0) || 0;
+  const n1 = parseFloat(amount1) || 0;
+  const usd0 = n0 * p0;
+  const usd1 = n1 * p1;
+  const total = usd0 + usd1;
 
   const bal0 = balances[pool.token0] ?? 0;
   const bal1 = balances[pool.token1] ?? 0;
-  const enough = need0 <= bal0 && need1 <= bal1;
+  const enough = n0 <= bal0 && n1 <= bal1;
+
+  const fmtAmt = (n: number) =>
+    n > 0 ? String(Number(n.toFixed(6))) : "";
+
+  // Typing one side recomputes the other at the pool ratio.
+  const onChange0 = (v: string) => {
+    setAmount0(v);
+    const n = parseFloat(v);
+    setAmount1(n > 0 && ratio01 > 0 ? fmtAmt(n * ratio01) : "");
+  };
+  const onChange1 = (v: string) => {
+    setAmount1(v);
+    const n = parseFloat(v);
+    setAmount0(n > 0 && ratio01 > 0 ? fmtAmt(n / ratio01) : "");
+  };
+  // Quick presets set a total USD amount, split 50/50 into token counts.
+  const setTotalUsd = (usd: number) => {
+    onChange0(p0 > 0 ? fmtAmt(usd / 2 / p0) : "");
+  };
+  const setMax0 = () => onChange0(bal0 > 0 ? fmtAmt(bal0) : "");
+  const setMax1 = () => onChange1(bal1 > 0 ? fmtAmt(bal1) : "");
 
   return (
     <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 p-4 pt-24">
@@ -113,29 +141,23 @@ export function AddLiquidityModal({
         </div>
 
         <div className="px-5 pb-5">
+          {/* Pool meta + total + USD presets */}
           <div className="rounded-2xl bg-[var(--surface)] p-4">
             <div className="flex items-center justify-between text-xs text-[var(--muted)]">
-              <span>Deposit amount (total)</span>
+              <span>Deposit by token amount</span>
               <span>{pool.feeTier}% fee · {pool.apr}% APR</span>
             </div>
-            <div className="mt-1 flex items-center">
-              <span className="text-2xl font-semibold text-[var(--muted)]">
-                $
+            <div className="mt-1 text-2xl font-semibold">
+              {formatUsd(total)}{" "}
+              <span className="text-sm font-normal text-[var(--muted)]">
+                total
               </span>
-              <input
-                type="number"
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0"
-                className="w-full bg-transparent text-2xl font-semibold outline-none placeholder:text-[var(--muted-2)]"
-              />
             </div>
             <div className="mt-2 flex gap-2">
               {[100, 500, 1000].map((v) => (
                 <button
                   key={v}
-                  onClick={() => setAmount(String(v))}
+                  onClick={() => setTotalUsd(v)}
                   className="rounded-lg bg-[var(--card)] px-2.5 py-1 text-xs font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)]"
                 >
                   ${v}
@@ -144,26 +166,36 @@ export function AddLiquidityModal({
             </div>
           </div>
 
-          {/* Split breakdown */}
+          {/* Editable token amounts — ratio-synced */}
           <div className="mt-3 space-y-2">
-            <SplitRow
+            <AmountRow
               symbol={pool.token0}
-              amount={need0}
+              value={amount0}
+              onChange={onChange0}
+              onMax={setMax0}
               balance={bal0}
-              usd={perSide}
+              usd={usd0}
             />
             <div className="flex justify-center">
               <Plus className="h-4 w-4 text-[var(--muted-2)]" />
             </div>
-            <SplitRow
+            <AmountRow
               symbol={pool.token1}
-              amount={need1}
+              value={amount1}
+              onChange={onChange1}
+              onMax={setMax1}
               balance={bal1}
-              usd={perSide}
+              usd={usd1}
             />
           </div>
 
-          <div className="mt-5">
+          {ratio01 > 0 && (
+            <p className="mt-3 text-center text-xs text-[var(--muted-2)]">
+              1 {pool.token0} = {formatNumber(ratio01, 6)} {pool.token1}
+            </p>
+          )}
+
+          <div className="mt-4">
             {!hydrated ? (
               <div className="h-12 w-full rounded-2xl bg-[var(--surface-2)] animate-pulse-soft" />
             ) : !connected ? (
@@ -178,7 +210,7 @@ export function AddLiquidityModal({
                 disabled
                 className="h-12 w-full rounded-2xl bg-[var(--accent)] font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--muted-2)]"
               >
-                {usd <= 0
+                {total <= 0
                   ? "Enter an amount"
                   : !enough
                     ? "Insufficient balance"
@@ -192,37 +224,49 @@ export function AddLiquidityModal({
   );
 }
 
-function SplitRow({
+function AmountRow({
   symbol,
-  amount,
+  value,
+  onChange,
+  onMax,
   balance,
   usd,
 }: {
   symbol: string;
-  amount: number;
+  value: string;
+  onChange: (v: string) => void;
+  onMax: () => void;
   balance: number;
   usd: number;
 }) {
-  const short = amount > balance;
+  const short = (parseFloat(value) || 0) > balance;
   return (
-    <div className="flex items-center justify-between rounded-2xl border border-[var(--border)] px-4 py-3">
-      <div className="flex items-center gap-2.5">
-        <TokenLogo symbol={symbol} size={32} />
-        <div>
+    <div className="rounded-2xl border border-[var(--border)] px-4 py-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <TokenLogo symbol={symbol} size={32} />
           <div className="text-sm font-semibold">{symbol}</div>
-          <div className="text-xs text-[var(--muted)]">
-            Balance: {formatNumber(balance, 4)}
-          </div>
         </div>
-      </div>
-      <div className="text-right">
-        <div
-          className="text-sm font-semibold"
+        <input
+          type="number"
+          inputMode="decimal"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="0"
+          aria-label={`${symbol} amount`}
+          className="w-1/2 bg-transparent text-right text-lg font-semibold outline-none placeholder:text-[var(--muted-2)]"
           style={{ color: short ? "var(--down)" : undefined }}
+        />
+      </div>
+      <div className="mt-1.5 flex items-center justify-between text-xs text-[var(--muted)]">
+        <button
+          onClick={onMax}
+          className="transition-colors hover:text-[var(--foreground)]"
         >
-          {formatNumber(amount, 6)}
-        </div>
-        <div className="text-xs text-[var(--muted)]">{formatUsd(usd)}</div>
+          Balance: {formatNumber(balance, 4)}{" "}
+          <span className="font-medium text-[var(--accent)]">MAX</span>
+        </button>
+        <span>{formatUsd(usd)}</span>
       </div>
     </div>
   );
