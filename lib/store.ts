@@ -11,9 +11,10 @@ import type {
   LmsRound,
   LmsHistoryEntry,
   LmsPendingClaim,
+  Pool,
   Transaction,
 } from "./types";
-import { seedCampaigns } from "./mock-data";
+import { seedCampaigns, seedPools } from "./mock-data";
 
 // NOTE: token balances are no longer stored here — they are read live from
 // BSC via wagmi (see lib/balances.ts). Trade execution (swap/LP/claims/bets)
@@ -158,6 +159,9 @@ interface DexState {
   adminTokens: AdminToken[];
   disabledTokens: string[]; // symbols hidden from swapping
 
+  // admin-managed liquidity pools (only pools that actually exist)
+  pools: Pool[];
+
   // Last Man Standing
   lms: {
     round: LmsRound;
@@ -191,6 +195,10 @@ interface DexState {
   addAdminToken: (token: AdminToken) => void;
   removeAdminToken: (symbol: string) => void;
   setTokenEnabled: (symbol: string, enabled: boolean) => void;
+
+  // admin — liquidity pools
+  addPool: (pool: Omit<Pool, "id">) => void;
+  removePool: (id: string) => void;
 }
 
 export const useDexStore = create<DexState>()(
@@ -204,6 +212,7 @@ export const useDexStore = create<DexState>()(
       campaigns: seedCampaigns(),
       adminTokens: [],
       disabledTokens: [],
+      pools: seedPools(),
       lms: {
         round: makeFreshRound(Date.now()),
         history: [],
@@ -388,6 +397,18 @@ export const useDexStore = create<DexState>()(
               ? s.disabledTokens
               : [...s.disabledTokens, symbol],
         })),
+
+      addPool: (pool) =>
+        set((s) => {
+          const base = `${pool.token0}-${pool.token1}`.toLowerCase();
+          let id = base;
+          let n = 2;
+          while (s.pools.some((p) => p.id === id)) id = `${base}-${n++}`;
+          return { pools: [...s.pools, { ...pool, id }] };
+        }),
+
+      removePool: (id) =>
+        set((s) => ({ pools: s.pools.filter((p) => p.id !== id) })),
     }),
     {
       // bumped from helix-dex-store → reseeds with IOI tokens/campaigns
@@ -399,8 +420,9 @@ export const useDexStore = create<DexState>()(
       //     actions (swap/LP/claims/bets) removed
       // v7: reseed campaigns for the BSC token/pool registry
       // v8: admin-managed swap token registry (adminTokens / disabledTokens)
+      // v9: admin-managed liquidity pools (real pools only)
       name: "ioi-dex-store",
-      version: 8,
+      version: 9,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) =>
         Object.fromEntries(

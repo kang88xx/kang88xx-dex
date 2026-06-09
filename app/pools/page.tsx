@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { Plus, Minus, Droplets } from "lucide-react";
-import { POOLS, POOL_MAP } from "@/lib/mock-data";
-import { useHydrated, usePositions } from "@/lib/store";
+import { useDexStore, useHydrated, usePositions } from "@/lib/store";
 import { formatCompact, formatUsd } from "@/lib/format";
 import { TokenPair } from "@/components/TokenLogo";
 import { AddLiquidityModal } from "@/components/AddLiquidityModal";
@@ -12,10 +11,12 @@ import { Eyebrow } from "@/components/ui";
 export default function PoolsPage() {
   const hydrated = useHydrated();
   const positions = usePositions();
+  const pools = useDexStore((s) => s.pools);
   const [addPool, setAddPool] = useState<string | null>(null);
 
+  const poolMap = new Map(pools.map((p) => [p.id, p]));
   // Ignore any persisted positions whose pool no longer exists.
-  const knownPositions = positions.filter((p) => POOL_MAP[p.poolId]);
+  const knownPositions = positions.filter((p) => poolMap.has(p.poolId));
   const positionMap = new Map(knownPositions.map((p) => [p.poolId, p]));
 
   return (
@@ -43,7 +44,7 @@ export default function PoolsPage() {
           </h2>
           <div className="mt-4 space-y-2">
             {knownPositions.map((p) => {
-              const pool = POOL_MAP[p.poolId];
+              const pool = poolMap.get(p.poolId)!;
               return (
                 <div
                   key={p.poolId}
@@ -100,7 +101,17 @@ export default function PoolsPage() {
             </tr>
           </thead>
           <tbody>
-            {POOLS.map((p) => {
+            {pools.length === 0 && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-5 py-12 text-center text-sm text-[var(--muted)]"
+                >
+                  No pools yet — create one from the Admin panel.
+                </td>
+              </tr>
+            )}
+            {pools.map((p) => {
               const hasPos = positionMap.has(p.id);
               return (
                 <tr

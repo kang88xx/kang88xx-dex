@@ -6,24 +6,27 @@ import { TOKEN_MAP } from "./tokens";
 export { TOKENS, TOKEN_MAP, getToken } from "./tokens";
 
 // ------------------------------------------------------------------
-//  Liquidity pools (BSC pairs — TVL/APR are placeholder numbers until
-//  real on-chain pools ship)
+//  Liquidity pools — only pools that actually exist on-chain.
+//
+//  This is the SEED for the admin-managed pool list (see lib/store.ts
+//  `pools`). Admins add/remove pools at runtime from /admin; the Pools
+//  page, add-liquidity modal, and campaign form read the store list.
+//  BNB/USDT below is the real PancakeSwap testnet pool we seeded
+//  (0.1 BNB : 60 USDT). PancakeSwap V2 fee tier is 0.25%.
 // ------------------------------------------------------------------
 
 export const POOLS: Pool[] = [
-  { id: "bnb-usdt", token0: "BNB", token1: "USDT", feeTier: 0.05, tvlUsd: 184_200_000, volume24h: 96_400_000, apr: 18.4 },
-  { id: "btcb-bnb", token0: "BTCB", token1: "BNB", feeTier: 0.3, tvlUsd: 142_800_000, volume24h: 54_100_000, apr: 12.9 },
-  { id: "eth-usdt", token0: "ETH", token1: "USDT", feeTier: 0.05, tvlUsd: 98_300_000, volume24h: 41_200_000, apr: 15.1 },
-  { id: "usdc-usdt", token0: "USDC", token1: "USDT", feeTier: 0.01, tvlUsd: 76_500_000, volume24h: 120_900_000, apr: 6.2 },
-  { id: "ioi-bnb", token0: "IOI", token1: "BNB", feeTier: 0.3, tvlUsd: 22_400_000, volume24h: 8_900_000, apr: 64.3 },
-  { id: "cake-bnb", token0: "CAKE", token1: "BNB", feeTier: 0.3, tvlUsd: 18_900_000, volume24h: 6_200_000, apr: 22.7 },
-  { id: "link-usdt", token0: "LINK", token1: "USDT", feeTier: 0.3, tvlUsd: 12_100_000, volume24h: 3_400_000, apr: 19.8 },
-  { id: "doge-bnb", token0: "DOGE", token1: "BNB", feeTier: 0.3, tvlUsd: 9_700_000, volume24h: 2_800_000, apr: 28.5 },
+  { id: "bnb-usdt", token0: "BNB", token1: "USDT", feeTier: 0.25, tvlUsd: 120, volume24h: 0, apr: 0 },
 ];
 
 export const POOL_MAP: Record<string, Pool> = Object.fromEntries(
   POOLS.map((p) => [p.id, p]),
 );
+
+/** Fresh copy of the seed pools for the store's initial state. */
+export function seedPools(): Pool[] {
+  return POOLS.map((p) => ({ ...p }));
+}
 
 // ------------------------------------------------------------------
 //  Deterministic price-history generator (stable across SSR/CSR)

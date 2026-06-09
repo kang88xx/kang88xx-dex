@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Plus } from "lucide-react";
 import { useAppKit } from "@reown/appkit/react";
-import { POOL_MAP } from "@/lib/mock-data";
 import { useDexStore, useHydrated } from "@/lib/store";
 import { useBalances } from "@/lib/balances";
 import { useMarket } from "@/lib/market";
@@ -19,6 +18,7 @@ export function AddLiquidityModal({
 }) {
   const hydrated = useHydrated();
   const connected = useDexStore((s) => s.connected);
+  const pools = useDexStore((s) => s.pools);
   const { open: openWalletModal } = useAppKit();
   const market = useMarket();
   const balances = useBalances();
@@ -75,7 +75,7 @@ export function AddLiquidityModal({
   }, [poolId, onClose]);
 
   if (!poolId) return null;
-  const pool = POOL_MAP[poolId];
+  const pool = pools.find((p) => p.id === poolId);
   if (!pool) return null;
 
   const p0 = market[pool.token0]?.priceUsd ?? 0;

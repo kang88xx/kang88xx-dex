@@ -12,8 +12,9 @@ import {
   X,
   Power,
   Coins,
+  Droplets,
 } from "lucide-react";
-import { POOLS, TOKENS } from "@/lib/mock-data";
+import { TOKENS } from "@/lib/mock-data";
 import { useDexStore, useHydrated } from "@/lib/store";
 import { useTokenRegistry, tokenTradable } from "@/lib/token-registry";
 import {
@@ -21,7 +22,7 @@ import {
   formatUsd,
   shortAddress,
 } from "@/lib/format";
-import { TokenLogo } from "@/components/TokenLogo";
+import { TokenLogo, TokenPair } from "@/components/TokenLogo";
 import { toast } from "@/components/toast";
 import { Eyebrow } from "@/components/ui";
 import type { AirdropCampaign, Eligibility } from "@/lib/types";
@@ -178,6 +179,179 @@ function AdminDashboard() {
 
       <div className="mt-10">
         <SwapTokensManager />
+      </div>
+
+      <div className="mt-10">
+        <PoolsManager />
+      </div>
+    </div>
+  );
+}
+
+/** Admin management of liquidity pools (only pools that actually exist). */
+function PoolsManager() {
+  const pools = useDexStore((s) => s.pools);
+  const addPool = useDexStore((s) => s.addPool);
+  const removePool = useDexStore((s) => s.removePool);
+  const { tradable } = useTokenRegistry();
+  const symbols = tradable.map((t) => t.symbol);
+
+  const [token0, setToken0] = useState(symbols[0] ?? "BNB");
+  const [token1, setToken1] = useState(symbols[1] ?? "USDT");
+  const [feeTier, setFeeTier] = useState("0.25");
+  const [tvlUsd, setTvlUsd] = useState("");
+  const [apr, setApr] = useState("");
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (token0 === token1) return toast.error("Pick two different tokens");
+    if (
+      pools.some(
+        (p) =>
+          (p.token0 === token0 && p.token1 === token1) ||
+          (p.token0 === token1 && p.token1 === token0),
+      )
+    )
+      return toast.error(`${token0}/${token1} pool already exists`);
+    const fee = parseFloat(feeTier);
+    if (!Number.isFinite(fee) || fee < 0 || fee > 100)
+      return toast.error("Fee must be 0–100%");
+
+    addPool({
+      token0,
+      token1,
+      feeTier: fee,
+      tvlUsd: parseFloat(tvlUsd) || 0,
+      volume24h: 0,
+      apr: parseFloat(apr) || 0,
+    });
+    toast.success(`Created ${token0}/${token1} pool`);
+    setTvlUsd("");
+    setApr("");
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-5">
+      {/* Create pool */}
+      <form
+        onSubmit={submit}
+        className="lg:col-span-2 h-fit rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5"
+      >
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
+          <Droplets className="h-4 w-4 text-[var(--accent)]" />
+          Create pool
+        </h2>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          List a pool that exists on-chain. Seed real liquidity on PancakeSwap
+          first, then record it here so it shows on the Pools page.
+        </p>
+
+        <div className="mt-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Token A">
+              <select
+                value={token0}
+                onChange={(e) => setToken0(e.target.value)}
+                className={INPUT}
+              >
+                {symbols.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Token B">
+              <select
+                value={token1}
+                onChange={(e) => setToken1(e.target.value)}
+                className={INPUT}
+              >
+                {symbols.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="Fee %">
+              <input
+                type="number"
+                value={feeTier}
+                onChange={(e) => setFeeTier(e.target.value)}
+                className={INPUT}
+              />
+            </Field>
+            <Field label="TVL $">
+              <input
+                type="number"
+                value={tvlUsd}
+                onChange={(e) => setTvlUsd(e.target.value)}
+                placeholder="0"
+                className={INPUT}
+              />
+            </Field>
+            <Field label="APR %">
+              <input
+                type="number"
+                value={apr}
+                onChange={(e) => setApr(e.target.value)}
+                placeholder="0"
+                className={INPUT}
+              />
+            </Field>
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          className="mt-5 w-full rounded-2xl bg-[var(--accent)] py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
+        >
+          Create pool
+        </button>
+      </form>
+
+      {/* Pool list */}
+      <div className="lg:col-span-3">
+        <h2 className="mb-3 text-sm font-semibold">Pools ({pools.length})</h2>
+        <div className="space-y-2">
+          {pools.length === 0 && (
+            <div className="rounded-3xl border border-dashed border-[var(--border-strong)] py-12 text-center text-sm text-[var(--muted)]">
+              No pools — create one on the left.
+            </div>
+          )}
+          {pools.map((p) => (
+            <div
+              key={p.id}
+              className="flex items-center justify-between rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
+            >
+              <div className="flex items-center gap-3">
+                <TokenPair token0={p.token0} token1={p.token1} />
+                <div>
+                  <div className="text-sm font-semibold">
+                    {p.token0} / {p.token1}
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">
+                    {p.feeTier}% fee · {formatUsd(p.tvlUsd, { compact: true })} TVL ·{" "}
+                    {p.apr}% APR
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  removePool(p.id);
+                  toast.info(`Removed ${p.token0}/${p.token1} pool`);
+                }}
+                title="Remove pool"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--down)] transition-colors hover:bg-[var(--down-soft)]"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -357,13 +531,14 @@ function SwapTokensManager() {
 
 function CampaignForm() {
   const createCampaign = useDexStore((s) => s.createCampaign);
+  const pools = useDexStore((s) => s.pools);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [tokenSymbol, setTokenSymbol] = useState("IOI");
   const [amountPerClaim, setAmountPerClaim] = useState("100");
   const [totalAllocation, setTotalAllocation] = useState("100000");
   const [eligibility, setEligibility] = useState<Eligibility>("public");
-  const [requiredPoolId, setRequiredPoolId] = useState(POOLS[0].id);
+  const [requiredPoolId, setRequiredPoolId] = useState(pools[0]?.id ?? "");
   const [durationDays, setDurationDays] = useState("14");
 
   const reset = () => {
@@ -499,7 +674,7 @@ function CampaignForm() {
               onChange={(e) => setRequiredPoolId(e.target.value)}
               className={INPUT}
             >
-              {POOLS.map((p) => (
+              {pools.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.token0} / {p.token1}
                 </option>
