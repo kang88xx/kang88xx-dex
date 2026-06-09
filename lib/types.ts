@@ -14,6 +14,8 @@ export interface Token {
   marketCap: number; // USD
   color: string; // logo background color (fallback when no logoUrl)
   logoUrl?: string; // optional logo image (e.g. /tokens/XP.svg)
+  logoTransparent?: boolean; // render logo with no background circle
+  logoScale?: number; // shrink the logo inside the circle (1 = full, 0.8 = 80%)
 }
 
 /** Live market snapshot for one token (from CoinGecko via /api/prices) */

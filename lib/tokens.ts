@@ -149,6 +149,8 @@ const MAINNET_TOKENS: Token[] = [
     volume24h: 42_000_000,
     marketCap: 124_000_000,
     color: "#1a1aee",
+    logoUrl: "/tokens/IOI.svg", // platform brand mark (X-glyph)
+    logoTransparent: true,
   },
 ];
 
@@ -211,6 +213,8 @@ const TESTNET_TOKENS: Token[] = [
     marketCap: 0,
     color: "#7c3aed",
     logoUrl: "/tokens/XP.svg",
+    logoTransparent: true,
+    logoScale: 0.8, // icon runs large — shrink 20% so corners aren't clipped
   },
   {
     // KANG — meme coin (500M supply). Price comes from its pool.
@@ -225,6 +229,7 @@ const TESTNET_TOKENS: Token[] = [
     marketCap: 0,
     color: "#0635fc",
     logoUrl: "/tokens/KANG.svg",
+    logoTransparent: true,
   },
   {
     symbol: "IOI",
@@ -237,6 +242,8 @@ const TESTNET_TOKENS: Token[] = [
     volume24h: 42_000_000,
     marketCap: 124_000_000,
     color: "#1a1aee",
+    logoUrl: "/tokens/IOI.svg", // platform brand mark (X-glyph)
+    logoTransparent: true,
   },
 ];
 
