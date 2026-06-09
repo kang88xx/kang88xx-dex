@@ -8,8 +8,11 @@ import { useBalance } from "@/lib/balances";
 import { formatNumber, shortAddress, timeAgoPure } from "@/lib/format";
 import { Eyebrow } from "@/components/ui";
 import { TokenLogo } from "@/components/TokenLogo";
+import { TOKEN_MAP } from "@/lib/tokens";
+import { CHAIN_LABEL } from "@/lib/chain";
 
-const USDT_BSC_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
+// Active-network USDT contract (mainnet canonical or your testnet test USDT).
+const USDT_ADDRESS = TOKEN_MAP.USDT?.address ?? "not deployed on this network";
 const QUICK_CHIPS = [1, 5, 10, 50];
 
 function mmss(ms: number): string {
@@ -159,7 +162,7 @@ export default function GamesPage() {
         </div>
 
         <div
-          title={`BSC USDT · ${USDT_BSC_ADDRESS}`}
+          title={`${CHAIN_LABEL} USDT · ${USDT_ADDRESS}`}
           className="hidden items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs sm:flex"
         >
           <TokenLogo symbol="USDT" size={18} />

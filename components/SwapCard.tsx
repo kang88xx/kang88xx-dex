@@ -25,13 +25,14 @@ import {
   swapDeadline,
   useSwapQuote,
 } from "@/lib/pancake";
+import { CHAIN_ID, CHAIN_LABEL } from "@/lib/chain";
 import { formatNumber, formatUsd } from "@/lib/format";
 import { TokenLogo } from "./TokenLogo";
 import { TokenSelectModal } from "./TokenSelectModal";
 import { toast } from "./toast";
 import { ArrowChip } from "./ui";
 
-const BSC_CHAIN_ID = 56;
+const BSC_CHAIN_ID = CHAIN_ID;
 // Keep a little BNB aside for gas when pressing MAX
 const BNB_GAS_RESERVE = 0.005;
 
@@ -365,7 +366,7 @@ export function SwapCard() {
                 Switching…
               </>
             ) : (
-              "Switch to BNB Smart Chain"
+              `Switch to ${CHAIN_LABEL}`
             )}
           </button>
         ) : (

@@ -4,7 +4,6 @@ import { type ReactNode, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAppKit } from "@reown/appkit/react";
 import { useAppKitTheme } from "@reown/appkit/react";
-import { bsc } from "@reown/appkit/networks";
 import {
   cookieToInitialState,
   useAccount,
@@ -12,6 +11,7 @@ import {
   type Config,
 } from "wagmi";
 import { projectId, wagmiAdapter, networks } from "@/lib/reown";
+import { ACTIVE_CHAIN } from "@/lib/chain";
 import { useDexStore } from "@/lib/store";
 
 const queryClient = new QueryClient();
@@ -31,7 +31,7 @@ createAppKit({
   adapters: [wagmiAdapter],
   projectId,
   networks,
-  defaultNetwork: bsc,
+  defaultNetwork: ACTIVE_CHAIN,
   metadata,
   features: {
     analytics: true,

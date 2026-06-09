@@ -1,7 +1,7 @@
 import { cookieStorage, createStorage } from "@wagmi/core";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
-import { bsc } from "@reown/appkit/networks";
 import type { AppKitNetwork } from "@reown/appkit/networks";
+import { ACTIVE_CHAIN } from "./chain";
 
 // Get one at https://dashboard.reown.com → set in .env.local
 export const projectId =
@@ -15,8 +15,9 @@ if (!projectId && typeof window !== "undefined") {
   );
 }
 
-// BSC first; append more chains here to expand (e.g. mainnet, arbitrum)
-export const networks: [AppKitNetwork, ...AppKitNetwork[]] = [bsc];
+// Active BNB chain (testnet or mainnet) — driven by NEXT_PUBLIC_CHAIN_ENV.
+// Append more chains here to expand (e.g. arbitrum).
+export const networks: [AppKitNetwork, ...AppKitNetwork[]] = [ACTIVE_CHAIN];
 
 export const wagmiAdapter = new WagmiAdapter({
   storage: createStorage({ storage: cookieStorage }),

@@ -4,15 +4,10 @@ import { useMemo } from "react";
 import { formatUnits, parseUnits } from "viem";
 import { useReadContracts } from "wagmi";
 import { TOKEN_MAP } from "./tokens";
+import { PANCAKE_ROUTER, WBNB } from "./chain";
 
-// ------------------------------------------------------------------
-//  PancakeSwap V2 Router02 (BSC mainnet, canonical)
-// ------------------------------------------------------------------
-
-export const PANCAKE_ROUTER =
-  "0x10ED43C718714eb63d5aA57B78B54704E256024E" as const;
-
-export const WBNB = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c" as const;
+// PancakeSwap V2 Router02 + WBNB — resolved per active network in lib/chain.ts.
+export { PANCAKE_ROUTER, WBNB };
 
 /** PancakeSwap V2 LP fee (0.25%) — shown in the swap details row */
 export const PANCAKE_FEE = 0.0025;

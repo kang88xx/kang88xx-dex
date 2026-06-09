@@ -1,4 +1,5 @@
 import type { Token } from "./types";
+import { IS_TESTNET } from "./chain";
 
 // ------------------------------------------------------------------
 //  BNB Smart Chain token registry (canonical contract addresses)
@@ -7,9 +8,13 @@ import type { Token } from "./types";
 //  shown until the first CoinGecko fetch resolves (see lib/market.ts).
 //  `address: null` = native BNB. `coingeckoId: null` = not listed (IOI),
 //  market data stays mock until the token launches.
+//
+//  Two registries: MAINNET (canonical BSC contracts) and TESTNET (your
+//  own deployed test tokens). The active one is chosen by NEXT_PUBLIC_CHAIN_ENV
+//  via lib/chain.ts. See TestToken.sol + TESTNET.md for how to mint test tokens.
 // ------------------------------------------------------------------
 
-export const TOKENS: Token[] = [
+const MAINNET_TOKENS: Token[] = [
   {
     symbol: "BNB",
     name: "BNB",
@@ -144,6 +149,66 @@ export const TOKENS: Token[] = [
     color: "#1a1aee",
   },
 ];
+
+// ------------------------------------------------------------------
+//  BSC TESTNET registry (chainId 97)
+//
+//  Testnet has none of the mainnet contracts above, so trading needs
+//  YOUR OWN deployed test tokens + a PancakeSwap testnet liquidity pool.
+//  Deploy the pegged test USDT (see TestToken.sol / TESTNET.md), then set
+//  its address in NEXT_PUBLIC_TUSDT_ADDRESS. Until then USDT is hidden.
+//
+//  BNB here is native testnet BNB (free from the faucet). USDT keeps the
+//  "tether" coingeckoId so it displays as ~$1 — the real swap rate comes
+//  from the pool ratio you seed on PancakeSwap testnet.
+// ------------------------------------------------------------------
+
+const TESTNET_USDT = process.env.NEXT_PUBLIC_TUSDT_ADDRESS;
+
+const TESTNET_TOKENS: Token[] = [
+  {
+    symbol: "BNB",
+    name: "BNB (Testnet)",
+    address: null, // native testnet coin (faucet-funded)
+    decimals: 18,
+    coingeckoId: "binancecoin",
+    priceUsd: 600,
+    change24h: 0,
+    volume24h: 0,
+    marketCap: 0,
+    color: "#f3ba2f",
+  },
+  ...(TESTNET_USDT
+    ? [
+        {
+          symbol: "USDT",
+          name: "Test Tether (pegged)",
+          address: TESTNET_USDT,
+          decimals: 18, // match BSC-peg USDT (18 decimals)
+          coingeckoId: "tether",
+          priceUsd: 1.0,
+          change24h: 0,
+          volume24h: 0,
+          marketCap: 0,
+          color: "#26a17b",
+        } satisfies Token,
+      ]
+    : []),
+  {
+    symbol: "IOI",
+    name: "Innovate Own Inspire",
+    address: null,
+    decimals: 18,
+    coingeckoId: null,
+    priceUsd: 1.24,
+    change24h: 11.6,
+    volume24h: 42_000_000,
+    marketCap: 124_000_000,
+    color: "#1a1aee",
+  },
+];
+
+export const TOKENS: Token[] = IS_TESTNET ? TESTNET_TOKENS : MAINNET_TOKENS;
 
 export const TOKEN_MAP: Record<string, Token> = Object.fromEntries(
   TOKENS.map((t) => [t.symbol, t]),
