@@ -48,5 +48,6 @@ next-env.d.ts
 .omx/state/
 .omx/logs/
 
-# keep the env template tracked
+# keep the env templates tracked
 !.env.example
+!.env.deploy.example

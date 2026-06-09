@@ -31,26 +31,42 @@ Add BSC Testnet to MetaMask if needed:
 ## 2. Deploy your pegged test USDT
 
 We ship a zero-dependency ERC-20 at `contracts/TestToken.sol` (18 decimals,
-matching real BSC-peg USDT).
+matching real BSC-peg USDT) plus a pre-compiled artifact
+(`contracts/TestToken.artifact.json`) and a one-command deploy script.
 
-1. Open <https://remix.ethereum.org>.
-2. Create `TestToken.sol`, paste the contents of `contracts/TestToken.sol`.
-3. Compile (Solidity 0.8.20+).
-4. **Deploy & Run** tab → Environment = **Injected Provider - MetaMask**
-   (make sure MetaMask is on BSC Testnet, chainId 97).
-5. Constructor args:
-   - `_name`  = `Test Tether`
-   - `_symbol` = `USDT`
-   - `initialMint` = `1000000`  (you receive 1,000,000 USDT)
-6. Click **Deploy**, confirm in MetaMask.
-7. Copy the deployed contract address.
+### Option A — one command (recommended)
 
-Need more later? Call `mint(yourAddress, amount)` (owner only) or the open
-`faucet()` (anyone gets 10,000).
+You sign with your own key; it never leaves your machine.
 
-> Want other test tokens too (e.g. a second stablecoin, a "BTC")? Deploy
-> `TestToken.sol` again with different name/symbol and add them to the
-> `TESTNET_TOKENS` array in `lib/tokens.ts`.
+1. Copy the env template and fill it in (it is gitignored):
+   ```
+   cp .env.deploy.example .env.deploy
+   ```
+   ```
+   DEPLOYER_PRIVATE_KEY=0x...    # a THROWAWAY testnet key holding only test BNB
+   TOKEN_NAME=Test Tether
+   TOKEN_SYMBOL=USDT
+   TOKEN_SUPPLY=1000000
+   ```
+   > To export a key from MetaMask: Account → ⋮ → Account details → Show private
+   > key. Use a fresh/throwaway account for this — **never** a key with real funds.
+2. Run:
+   ```
+   npm run deploy:token
+   ```
+3. It prints the deployed contract address + a testnet.bscscan link.
+
+### Option B — Remix (no key in a file)
+
+1. Open <https://remix.ethereum.org>, create `TestToken.sol`, paste
+   `contracts/TestToken.sol`, compile (Solidity 0.8.20+).
+2. **Deploy & Run** → Environment = **Injected Provider - MetaMask**
+   (MetaMask on BSC Testnet, chainId 97).
+3. Constructor args: `_name`=`Test Tether`, `_symbol`=`USDT`,
+   `initialMint`=`1000000`. Deploy, confirm, copy the address.
+
+Need more tokens later? Call `mint(yourAddress, amount)` (owner only) or the
+open `faucet()` (anyone gets 10,000).
 
 ---
 
@@ -99,6 +115,42 @@ The more liquidity you add, the more stable the "peg" against test trades.
 1. `npm run dev`, open the app, connect wallet (it defaults to BSC Testnet).
 2. Swap tBNB → USDT. You should get a quote from your pool and a real on-chain tx.
 3. Check the tx on <https://testnet.bscscan.com>.
+
+---
+
+## 5b. Issue a new token / meme coin on testnet
+
+The same `TestToken` contract mints any token — a stablecoin, a "BTC", or a
+meme coin. Three steps:
+
+1. **Deploy it.** Edit `.env.deploy` and re-run the script:
+   ```
+   TOKEN_NAME=Doge Killer
+   TOKEN_SYMBOL=DOGEK
+   TOKEN_SUPPLY=1000000000     # 1B supply, classic meme tokenomics
+   ```
+   ```
+   npm run deploy:token
+   ```
+   Copy the printed address.
+
+2. **List it in the DEX.** Go to `/admin` → **Add swap token**, enter the
+   symbol (`DOGEK`), name, the deployed address, and `18` decimals. It appears
+   in the swap picker immediately (no redeploy). You can disable/remove it there
+   too.
+
+3. **Give it a price = create a pool.** On PancakeSwap testnet
+   (<https://pancakeswap.finance/add>) add liquidity pairing your token with BNB
+   or your test USDT at whatever ratio you want its launch price to be. Example:
+   `1,000,000 DOGEK : 1 BNB` → very cheap meme price. Without a pool the token
+   shows in the list but swaps say "No liquidity route".
+
+Tips:
+- `faucet()` lets any tester grab 10,000 of the token; `mint(addr, amount)`
+  (owner) tops up specific wallets.
+- Deploy as many tokens as you like — just change `TOKEN_*` and re-run.
+- The logo is auto-generated (initials on a colored circle); custom art isn't
+  needed for testing.
 
 ---
 
