@@ -12,7 +12,8 @@ export interface Token {
   change24h: number; // % change, can be negative
   volume24h: number; // USD
   marketCap: number; // USD
-  color: string; // logo background color
+  color: string; // logo background color (fallback when no logoUrl)
+  logoUrl?: string; // optional logo image (e.g. /tokens/XP.svg)
 }
 
 /** Live market snapshot for one token (from CoinGecko via /api/prices) */

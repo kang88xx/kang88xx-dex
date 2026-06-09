@@ -195,6 +195,34 @@ const TESTNET_TOKENS: Token[] = [
       ]
     : []),
   {
+    // Xphere — L1 token (testnet ERC-20). Price comes from its pool.
+    symbol: "XP",
+    name: "Xphere",
+    address: "0x06583Bf24741cD4Fa39DAe09E3cf02d599be478e",
+    decimals: 18,
+    coingeckoId: null,
+    priceUsd: 0,
+    change24h: 0,
+    volume24h: 0,
+    marketCap: 0,
+    color: "#7c3aed",
+    logoUrl: "/tokens/XP.svg",
+  },
+  {
+    // KANG — meme coin (500M supply). Price comes from its pool.
+    symbol: "KANG",
+    name: "Kang",
+    address: "0x95523061Fb69F8EDaF28Fa07f371BfB565362fE2",
+    decimals: 18,
+    coingeckoId: null,
+    priceUsd: 0,
+    change24h: 0,
+    volume24h: 0,
+    marketCap: 0,
+    color: "#0635fc",
+    logoUrl: "/tokens/KANG.svg",
+  },
+  {
     symbol: "IOI",
     name: "Innovate Own Inspire",
     address: null,

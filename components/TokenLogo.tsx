@@ -10,6 +10,21 @@ export function TokenLogo({
   const token = getToken(symbol);
   const color = token?.color ?? "#71717a";
   const label = symbol.slice(0, symbol.length > 3 ? 2 : symbol.length);
+
+  if (token?.logoUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={token.logoUrl}
+        alt={symbol}
+        width={size}
+        height={size}
+        className="rounded-full object-cover shrink-0"
+        style={{ width: size, height: size, background: color }}
+      />
+    );
+  }
+
   return (
     <span
       className="inline-flex items-center justify-center rounded-full font-semibold text-white shrink-0"
