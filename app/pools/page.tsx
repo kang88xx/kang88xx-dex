@@ -4,14 +4,33 @@ import { useState } from "react";
 import { Plus, Minus, Droplets } from "lucide-react";
 import { useDexStore, useHydrated, usePositions } from "@/lib/store";
 import { formatCompact, formatUsd } from "@/lib/format";
+import { usePoolStats, type PoolStats } from "@/lib/pool-stats";
 import { TokenPair } from "@/components/TokenLogo";
 import { AddLiquidityModal } from "@/components/AddLiquidityModal";
 import { Eyebrow } from "@/components/ui";
+
+/** Format a live APR percent, or "—"/"…" when unavailable/loading. */
+function aprText(s: PoolStats | undefined): string {
+  if (!s || s.loading) return "…";
+  if (!s.available) return "—";
+  return `${s.apr.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
+}
+
+/** Format a live USD stat (TVL / volume), or "—"/"…". */
+function usdText(
+  s: PoolStats | undefined,
+  pick: (s: PoolStats) => number,
+): string {
+  if (!s || s.loading) return "…";
+  if (!s.available) return "—";
+  return `$${formatCompact(pick(s))}`;
+}
 
 export default function PoolsPage() {
   const hydrated = useHydrated();
   const positions = usePositions();
   const pools = useDexStore((s) => s.pools);
+  const stats = usePoolStats(pools);
   const [addPool, setAddPool] = useState<string | null>(null);
 
   const poolMap = new Map(pools.map((p) => [p.id, p]));
@@ -67,7 +86,7 @@ export default function PoolsPage() {
                         {formatUsd(p.amountUsd)}
                       </div>
                       <div className="text-xs text-[var(--up)]">
-                        {pool.apr}% APR
+                        {aprText(stats[p.poolId])} APR
                       </div>
                     </div>
                     <button
@@ -137,13 +156,13 @@ export default function PoolsPage() {
                     </div>
                   </td>
                   <td className="px-2 py-4 text-right font-medium">
-                    ${formatCompact(p.tvlUsd)}
+                    {usdText(stats[p.id], (s) => s.tvlUsd)}
                   </td>
                   <td className="hidden px-2 py-4 text-right text-[var(--muted)] sm:table-cell">
-                    ${formatCompact(p.volume24h)}
+                    {usdText(stats[p.id], (s) => s.volume24h)}
                   </td>
                   <td className="px-2 py-4 text-right font-semibold text-[var(--up)]">
-                    {p.apr}%
+                    {aprText(stats[p.id])}
                   </td>
                   <td className="px-5 py-4 text-right">
                     <button

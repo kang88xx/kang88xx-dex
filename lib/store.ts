@@ -193,12 +193,17 @@ interface DexState {
     address: string,
     amount: number,
   ) => void;
+  addManyToWhitelist: (
+    campaignId: string,
+    entries: { address: string; amount: number }[],
+  ) => void;
   removeFromWhitelist: (campaignId: string, address: string) => void;
   setWhitelistClaimed: (
     campaignId: string,
     address: string,
     claimed: boolean,
   ) => void;
+  recordClaim: (campaignId: string) => void;
 
   // admin — swap token registry
   addAdminToken: (token: AdminToken) => void;
@@ -355,12 +360,22 @@ export const useDexStore = create<DexState>()(
       deleteCampaign: (id) =>
         set((s) => ({ campaigns: s.campaigns.filter((c) => c.id !== id) })),
 
+      // Adding an address that already exists ACCUMULATES its allocation.
       addToWhitelist: (campaignId, address, amount) =>
         set((s) => ({
           campaigns: s.campaigns.map((c) => {
             if (c.id !== campaignId) return c;
             const addr = address.trim().toLowerCase();
-            if (!addr || c.whitelist.some((w) => w.address === addr)) return c;
+            if (!addr || !Number.isFinite(amount) || amount <= 0) return c;
+            const idx = c.whitelist.findIndex((w) => w.address === addr);
+            if (idx >= 0) {
+              const whitelist = [...c.whitelist];
+              whitelist[idx] = {
+                ...whitelist[idx],
+                amount: whitelist[idx].amount + amount,
+              };
+              return { ...c, whitelist };
+            }
             return {
               ...c,
               whitelist: [
@@ -368,6 +383,24 @@ export const useDexStore = create<DexState>()(
                 { address: addr, amount, claimed: false },
               ],
             };
+          }),
+        })),
+
+      // Batch apply many allocations in one update; duplicates (incl. repeats
+      // within `entries`) accumulate onto the existing/first amount.
+      addManyToWhitelist: (campaignId, entries) =>
+        set((s) => ({
+          campaigns: s.campaigns.map((c) => {
+            if (c.id !== campaignId) return c;
+            const map = new Map(c.whitelist.map((w) => [w.address, { ...w }]));
+            for (const e of entries) {
+              const addr = e.address.trim().toLowerCase();
+              if (!addr || !Number.isFinite(e.amount) || e.amount <= 0) continue;
+              const existing = map.get(addr);
+              if (existing) existing.amount += e.amount;
+              else map.set(addr, { address: addr, amount: e.amount, claimed: false });
+            }
+            return { ...c, whitelist: [...map.values()] };
           }),
         })),
 
@@ -404,6 +437,34 @@ export const useDexStore = create<DexState>()(
               : c,
           ),
         })),
+
+      // Record that the connected wallet claimed a campaign (after the on-chain
+      // claim tx confirms). Also marks the whitelist entry received.
+      recordClaim: (campaignId) =>
+        set((s) => {
+          const addr = s.address;
+          if (!addr) return s;
+          const prev = s.claims[addr] ?? [];
+          const claims = prev.includes(campaignId)
+            ? s.claims
+            : { ...s.claims, [addr]: [...prev, campaignId] };
+          return {
+            claims,
+            campaigns: s.campaigns.map((c) =>
+              c.id === campaignId
+                ? {
+                    ...c,
+                    claimedCount: c.claimedCount + 1,
+                    whitelist: c.whitelist.map((w) =>
+                      w.address === addr.toLowerCase()
+                        ? { ...w, claimed: true, claimedAt: Date.now() }
+                        : w,
+                    ),
+                  }
+                : c,
+            ),
+          };
+        }),
 
       addAdminToken: (token) =>
         set((s) => {

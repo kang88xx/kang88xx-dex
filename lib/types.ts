@@ -46,7 +46,7 @@ export interface AdminToken {
   color: string; // logo background color
 }
 
-export type Eligibility = "public" | "whitelist" | "lp";
+export type Eligibility = "public" | "whitelist";
 
 /** One whitelisted wallet: its allocation and whether it has been received. */
 export interface WhitelistEntry {
@@ -66,7 +66,8 @@ export interface AirdropCampaign {
   claimedCount: number;
   eligibility: Eligibility;
   whitelist: WhitelistEntry[]; // per-wallet allocations (eligibility === "whitelist")
-  requiredPoolId?: string; // used when eligibility === "lp"
+  /** Campaign id in the on-chain MerkleAirdrop contract once launched (claims go live). */
+  onchainId?: number;
   active: boolean;
   endsAt: number; // epoch ms
   createdAt: number; // epoch ms

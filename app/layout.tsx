@@ -22,10 +22,36 @@ const plexMono = IBM_Plex_Mono({
   subsets: ["latin"],
 });
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+const TITLE = "IOI DEX — Trade. Earn. Grow Together.";
+const DESCRIPTION =
+  "IOI is a decentralized exchange: swap tokens, provide liquidity, track markets, stake, and claim airdrops. Built onchain, designed for scale.";
+
 export const metadata: Metadata = {
-  title: "IOI — Innovate · Own · Inspire",
-  description:
-    "IOI is a decentralized exchange: swap tokens, provide liquidity, track markets, stake, and claim airdrops. Built onchain, designed for scale.",
+  metadataBase: new URL(SITE_URL),
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: {
+    type: "website",
+    siteName: "IOI DEX",
+    title: TITLE,
+    description: DESCRIPTION,
+    url: SITE_URL,
+    images: [
+      {
+        url: "/og.png",
+        width: 1610,
+        height: 977,
+        alt: "IOI DEX — Trade. Earn. Grow Together.",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+    images: ["/og.png"],
+  },
 };
 
 export default async function RootLayout({

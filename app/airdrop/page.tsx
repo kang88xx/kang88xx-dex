@@ -1,24 +1,18 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useAppKit } from "@reown/appkit/react";
-import {
-  Gift,
-  Check,
-  Lock,
-  Globe,
-  Droplets,
-  ShieldCheck,
-} from "lucide-react";
-import { POOL_MAP, TOKEN_MAP } from "@/lib/mock-data";
-import {
-  useClaimedIds,
-  useDexStore,
-  useHydrated,
-  usePositions,
-} from "@/lib/store";
+import { Gift, Check, Lock, Globe, ShieldCheck, Loader2 } from "lucide-react";
+import { parseUnits } from "viem";
+import { useAccount, usePublicClient, useWriteContract } from "wagmi";
+import { TOKEN_MAP } from "@/lib/mock-data";
+import { useClaimedIds, useDexStore, useHydrated } from "@/lib/store";
 import { daysUntil, formatCompact, formatUsd, isPast } from "@/lib/format";
+import { merkleProof } from "@/lib/merkle";
+import { AIRDROP_ABI, AIRDROP_CONTRACT, airdropLive, CHAIN_ID } from "@/lib/airdrop";
 import { TokenLogo } from "@/components/TokenLogo";
+import { toast } from "@/components/toast";
 import { Eyebrow } from "@/components/ui";
 import type { AirdropCampaign, Eligibility } from "@/lib/types";
 
@@ -28,7 +22,6 @@ const ELIGIBILITY_META: Record<
 > = {
   public: { label: "Public", icon: <Globe className="h-3.5 w-3.5" /> },
   whitelist: { label: "Whitelist", icon: <Lock className="h-3.5 w-3.5" /> },
-  lp: { label: "LP required", icon: <Droplets className="h-3.5 w-3.5" /> },
 };
 
 export default function AirdropPage() {
@@ -84,9 +77,13 @@ export default function AirdropPage() {
 function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
   const connected = useDexStore((s) => s.connected);
   const address = useDexStore((s) => s.address);
+  const recordClaim = useDexStore((s) => s.recordClaim);
   const { open: openWalletModal } = useAppKit();
+  const { address: wallet, chainId } = useAccount();
+  const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
   const claimedIds = useClaimedIds();
-  const positions = usePositions();
+  const [claiming, setClaiming] = useState(false);
 
   const token = TOKEN_MAP[c.tokenSymbol];
   // Whitelist wallets carry their own allocation; everyone else uses the default.
@@ -107,15 +104,51 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
   if (c.eligibility === "whitelist") {
     eligible = !!wlEntry;
     reason = "Your wallet is not whitelisted";
-  } else if (c.eligibility === "lp") {
-    eligible = positions.some((p) => p.poolId === c.requiredPoolId);
-    const pool = c.requiredPoolId ? POOL_MAP[c.requiredPoolId] : undefined;
-    reason = pool
-      ? `Add liquidity to ${pool.token0}/${pool.token1} first`
-      : "Liquidity position required";
   }
 
-  const meta = ELIGIBILITY_META[c.eligibility];
+  // On-chain claim is live once the campaign was launched (has an onchainId)
+  // and a contract address is configured.
+  const isOnchain = airdropLive && c.onchainId != null;
+
+  const doClaim = async () => {
+    if (!isOnchain || c.onchainId == null || !wallet || !publicClient) return;
+    if (chainId !== CHAIN_ID)
+      return toast.error("지갑 네트워크를 BSC로 전환하세요");
+    const tok = TOKEN_MAP[c.tokenSymbol];
+    if (!tok) return;
+    // Rebuild the exact allocation set used at launch to regenerate the proof.
+    const allocs = c.whitelist.map((w) => ({
+      address: w.address,
+      amountWei: parseUnits(String(w.amount), tok.decimals).toString(),
+    }));
+    const pf = merkleProof(allocs, wallet);
+    if (!pf) return toast.error("이 지갑은 화이트리스트에 없습니다");
+    try {
+      setClaiming(true);
+      toast.info("클레임 트랜잭션을 지갑에서 승인하세요");
+      const hash = await writeContractAsync({
+        address: AIRDROP_CONTRACT as `0x${string}`,
+        abi: AIRDROP_ABI,
+        functionName: "claim",
+        args: [BigInt(c.onchainId), BigInt(pf.amountWei), pf.proof],
+        chainId: CHAIN_ID,
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") return toast.error("클레임 실패");
+      recordClaim(c.id);
+      toast.success(
+        `${claimAmount.toLocaleString()} ${c.tokenSymbol} 클레임 완료!`,
+      );
+    } catch {
+      toast.error("클레임 실패 — 이미 수령했거나 지갑에서 거부됨");
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  // Fallback guards against any legacy persisted campaign (e.g. the removed
+  // "lp" eligibility) so an unknown value can't crash the card.
+  const meta = ELIGIBILITY_META[c.eligibility] ?? ELIGIBILITY_META.public;
 
   return (
     <div className="flex flex-col rounded-3xl border border-[var(--border)] bg-[var(--card)] p-6">
@@ -194,6 +227,17 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
           >
             <Check className="h-5 w-5" />
             Claimed
+          </button>
+        ) : eligible && !ended && !soldOut && isOnchain ? (
+          <button
+            onClick={doClaim}
+            disabled={claiming}
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {claiming && <Loader2 className="h-5 w-5 animate-spin" />}
+            {claiming
+              ? "Claiming…"
+              : `Claim ${claimAmount.toLocaleString()} ${c.tokenSymbol}`}
           </button>
         ) : (
           <button

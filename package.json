@@ -7,9 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "deploy:token": "node scripts/deploy-token.mjs"
+    "deploy:token": "node scripts/deploy-token.mjs",
+    "compile:airdrop": "node scripts/compile-contract.mjs MerkleAirdrop",
+    "deploy:airdrop": "node scripts/deploy-airdrop.mjs",
+    "test:merkle": "node scripts/test-merkle.mjs"
   },
   "dependencies": {
+    "@openzeppelin/merkle-tree": "^1.0.8",
     "@reown/appkit": "^1.8.20",
     "@reown/appkit-adapter-wagmi": "^1.8.20",
     "@tanstack/react-query": "^5.101.0",
@@ -30,6 +34,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "solc": "^0.8.26",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

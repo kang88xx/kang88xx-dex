@@ -62,8 +62,9 @@ function WalletSync() {
 }
 
 /**
- * Fire-and-forget analytics: one page view per tab session, plus a count for
- * each wallet that connects (server dedupes per KST day). Failures are ignored.
+ * Fire-and-forget analytics: one page view per device every 6 hours, plus a
+ * count for each wallet that connects (server dedupes per KST day). Failures
+ * are ignored.
  */
 function AnalyticsTracker() {
   const { address, status } = useAccount();
@@ -78,8 +79,13 @@ function AnalyticsTracker() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (sessionStorage.getItem("ioi_visited")) return;
-    sessionStorage.setItem("ioi_visited", "1");
+    // Count one visit per device every 6 hours. localStorage persists across
+    // tabs/sessions (unlike sessionStorage), so reopening or new tabs don't
+    // re-count until the 6h window elapses.
+    const WINDOW_MS = 6 * 60 * 60 * 1000;
+    const last = Number(localStorage.getItem("ioi_visited_at") ?? 0);
+    if (Date.now() - last < WINDOW_MS) return;
+    localStorage.setItem("ioi_visited_at", String(Date.now()));
     post({ event: "visit" });
   }, []);
 

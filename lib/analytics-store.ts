@@ -12,19 +12,42 @@ import { join } from "node:path";
 const DIR = join(process.cwd(), ".data");
 const FILE = join(DIR, "analytics.json");
 
+/** A single new-wallet connection — address + unix ms of first connect. */
+export interface ConnectionLog {
+  address: string;
+  ts: number;
+}
+
+/** A swap, attributed to a token pair, for rolling 24h per-pool volume. */
+interface SwapLog {
+  pair: string; // sorted symbol key, e.g. "BNB-USDT"
+  usd: number;
+  ts: number;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 interface Data {
   visitorsByDay: Record<string, number>;
-  connectionsByDay: Record<string, number>;
   volumeByDay: Record<string, number>;
-  seenByDay: Record<string, string[]>; // wallets already counted today
+  // Wallet connections are counted once per wallet, all-time (new wallets
+  // only). We keep a cumulative total, the dedupe set, and a log of each
+  // new wallet's first connection (address + timestamp — nothing else).
+  connectionsTotal: number;
+  seenWallets: string[];
+  connectionLog: ConnectionLog[];
+  // Rolling log of swaps (pruned to the last 24h) for per-pool Fee APR.
+  swapLog: SwapLog[];
 }
 
 function empty(): Data {
   return {
     visitorsByDay: {},
-    connectionsByDay: {},
     volumeByDay: {},
-    seenByDay: {},
+    connectionsTotal: 0,
+    seenWallets: [],
+    connectionLog: [],
+    swapLog: [],
   };
 }
 
@@ -62,29 +85,60 @@ export function recordVisit(): void {
   save(d);
 }
 
-/** Counts each wallet once per KST day. */
-export function recordConnection(address: string): void {
+/** Counts each wallet once, all-time (new wallets only). */
+export function recordConnection(address: string, now = Date.now()): void {
   const d = load();
-  const k = kstDayKey();
   const addr = address.toLowerCase();
-  const seen = d.seenByDay[k] ?? (d.seenByDay[k] = []);
-  if (seen.includes(addr)) return;
-  seen.push(addr);
-  d.connectionsByDay[k] = (d.connectionsByDay[k] ?? 0) + 1;
+  if (d.seenWallets.includes(addr)) return;
+  d.seenWallets.push(addr);
+  d.connectionsTotal += 1;
+  d.connectionLog.push({ address: addr, ts: now });
   save(d);
 }
 
-export function recordVolume(usd: number): void {
+/** Full new-wallet connection log, newest first. */
+export function connectionLog(): ConnectionLog[] {
+  return [...load().connectionLog].sort((a, b) => b.ts - a.ts);
+}
+
+/** Per-day visitor counts (KST day key + count), newest day first. */
+export function visitorDays(): { date: string; count: number }[] {
+  const { visitorsByDay } = load();
+  return Object.entries(visitorsByDay)
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export function recordVolume(usd: number, pair?: string, now = Date.now()): void {
   if (!Number.isFinite(usd) || usd <= 0) return;
   const d = load();
-  const k = kstDayKey();
+  const k = kstDayKey(now);
   d.volumeByDay[k] = (d.volumeByDay[k] ?? 0) + usd;
+  if (pair) {
+    // Keep only the last 24h so the rolling per-pair total stays bounded.
+    d.swapLog = (d.swapLog ?? []).filter((e) => now - e.ts < DAY_MS);
+    d.swapLog.push({ pair, usd, ts: now });
+  }
   save(d);
+}
+
+/** Rolling 24h swap volume (USD) per token-pair key, e.g. { "BNB-USDT": 1234 }. */
+export function volume24hByPair(now = Date.now()): Record<string, number> {
+  const { swapLog } = load();
+  const out: Record<string, number> = {};
+  (swapLog ?? []).forEach((e) => {
+    if (now - e.ts >= DAY_MS) return;
+    out[e.pair] = (out[e.pair] ?? 0) + e.usd;
+  });
+  return out;
 }
 
 export interface TodaySummary {
   day: string;
   visitors: number;
+  /** Cumulative visitors across all days. */
+  visitorsTotal: number;
+  /** Cumulative unique-wallet connections, all-time (not today). */
   connections: number;
   volumeUsd: number;
 }
@@ -92,10 +146,15 @@ export interface TodaySummary {
 export function todaySummary(): TodaySummary {
   const d = load();
   const k = kstDayKey();
+  const visitorsTotal = Object.values(d.visitorsByDay).reduce(
+    (sum, n) => sum + n,
+    0,
+  );
   return {
     day: k,
     visitors: d.visitorsByDay[k] ?? 0,
-    connections: d.connectionsByDay[k] ?? 0,
+    visitorsTotal,
+    connections: d.connectionsTotal,
     volumeUsd: d.volumeByDay[k] ?? 0,
   };
 }

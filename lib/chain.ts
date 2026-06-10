@@ -35,3 +35,19 @@ export const WBNB = (process.env.NEXT_PUBLIC_WBNB ??
   (IS_TESTNET
     ? "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd" // WBNB (testnet)
     : "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")) as `0x${string}`;
+
+// PancakeSwap V2 Factory — resolves a pair address from two token addresses
+// (getPair). Used to read live reserves for real pool TVL/APR.
+export const PANCAKE_FACTORY = (process.env.NEXT_PUBLIC_PANCAKE_FACTORY ??
+  (IS_TESTNET
+    ? "0x6725F303b657a9451d8BA641348b6761A6CC7a17" // PancakeSwap V2 factory (testnet)
+    : "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73")) as `0x${string}`;
+
+// MerkleAirdrop contract — deploy with `npm run deploy:airdrop`, then set the
+// resulting address here per network. Empty = not deployed yet (on-chain
+// claims disabled, admin shows "deploy first").
+export const AIRDROP_CONTRACT = ((IS_TESTNET
+  ? process.env.NEXT_PUBLIC_AIRDROP_TESTNET
+  : process.env.NEXT_PUBLIC_AIRDROP_MAINNET) ?? "") as
+  | `0x${string}`
+  | "";

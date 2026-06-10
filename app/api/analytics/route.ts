@@ -13,7 +13,12 @@ export const dynamic = "force-dynamic";
 // Ingest a single event. Public — any visitor reports their own page view /
 // wallet connect / completed swap. Counters are deduped server-side.
 export async function POST(req: Request) {
-  let body: { event?: string; address?: string; volumeUsd?: number } = {};
+  let body: {
+    event?: string;
+    address?: string;
+    volumeUsd?: number;
+    pair?: string;
+  } = {};
   try {
     body = await req.json();
   } catch {
@@ -33,7 +38,13 @@ export async function POST(req: Request) {
       }
       break;
     case "swap":
-      if (typeof body.volumeUsd === "number") recordVolume(body.volumeUsd);
+      if (typeof body.volumeUsd === "number") {
+        const pair =
+          typeof body.pair === "string" && /^[A-Z0-9]+-[A-Z0-9]+$/.test(body.pair)
+            ? body.pair
+            : undefined;
+        recordVolume(body.volumeUsd, pair);
+      }
       break;
     default:
       return NextResponse.json(

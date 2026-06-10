@@ -147,22 +147,6 @@ export function seedCampaigns(): AirdropCampaign[] {
       endsAt: now + 14 * DAY,
       createdAt: now - 2 * DAY,
     },
-    {
-      id: "lp-bonus",
-      name: "Liquidity Provider Bonus",
-      description:
-        "Provide liquidity to the IOI/BNB pool to unlock this claim. Add a position from the Pools page first.",
-      tokenSymbol: "IOI",
-      amountPerClaim: 120,
-      totalAllocation: 80_000,
-      claimedCount: 540,
-      eligibility: "lp",
-      requiredPoolId: "ioi-bnb",
-      whitelist: [],
-      active: true,
-      endsAt: now + 21 * DAY,
-      createdAt: now - 1 * DAY,
-    },
   ];
 }
 
