@@ -4,30 +4,46 @@ import { useState } from "react";
 import Link from "next/link";
 import { useAppKit } from "@reown/appkit/react";
 import { Gift, Check, Lock, Globe, ShieldCheck, Loader2 } from "lucide-react";
-import { parseUnits } from "viem";
-import { useAccount, usePublicClient, useWriteContract } from "wagmi";
+import { formatUnits, parseUnits } from "viem";
+import {
+  useAccount,
+  usePublicClient,
+  useReadContract,
+  useWriteContract,
+} from "wagmi";
+import { useQueryClient } from "@tanstack/react-query";
 import { TOKEN_MAP } from "@/lib/mock-data";
-import { useClaimedIds, useDexStore, useHydrated } from "@/lib/store";
+import { useDexStore, useHydrated } from "@/lib/store";
 import { daysUntil, formatCompact, formatUsd, isPast } from "@/lib/format";
 import { merkleProof } from "@/lib/merkle";
 import { AIRDROP_ABI, AIRDROP_CONTRACT, airdropLive, CHAIN_ID } from "@/lib/airdrop";
+import {
+  useOnchainCampaigns,
+  usePublishedWhitelist,
+  type OnchainCampaign,
+} from "@/lib/onchain-campaigns";
 import { TokenLogo } from "@/components/TokenLogo";
 import { toast } from "@/components/toast";
 import { Eyebrow } from "@/components/ui";
-import type { AirdropCampaign, Eligibility } from "@/lib/types";
-
-const ELIGIBILITY_META: Record<
-  Eligibility,
-  { label: string; icon: React.ReactNode }
-> = {
-  public: { label: "Public", icon: <Globe className="h-3.5 w-3.5" /> },
-  whitelist: { label: "Whitelist", icon: <Lock className="h-3.5 w-3.5" /> },
-};
+import type { AirdropCampaign } from "@/lib/types";
 
 export default function AirdropPage() {
   const hydrated = useHydrated();
-  const campaigns = useDexStore((s) => s.campaigns);
-  const active = campaigns.filter((c) => c.active);
+  const { campaigns: onchain, isLoading } = useOnchainCampaigns();
+  const localCampaigns = useDexStore((s) => s.campaigns);
+
+  // On-chain campaigns are the claimable source of truth — every visitor reads
+  // them straight from the contract, no admin-local data needed.
+  const liveOnchain = onchain.filter((c) => c.active);
+  const launchedIds = new Set(liveOnchain.map((c) => c.onchainId));
+
+  // Local campaigns not yet launched on-chain → shown as previews (not claimable).
+  const drafts = localCampaigns.filter(
+    (c) => c.active && (c.onchainId == null || !launchedIds.has(c.onchainId)),
+  );
+
+  const loading = !hydrated || isLoading;
+  const nothing = !loading && liveOnchain.length === 0 && drafts.length === 0;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
@@ -46,12 +62,12 @@ export default function AirdropPage() {
         </div>
       </div>
 
-      {!hydrated ? (
+      {loading ? (
         <div className="mt-8 grid gap-5 md:grid-cols-2">
           <div className="h-64 rounded-3xl bg-[var(--surface-2)] animate-pulse-soft" />
           <div className="h-64 rounded-3xl bg-[var(--surface-2)] animate-pulse-soft" />
         </div>
-      ) : active.length === 0 ? (
+      ) : nothing ? (
         <div className="mt-10 rounded-3xl border border-dashed border-[var(--border-strong)] py-16 text-center">
           <p className="text-sm text-[var(--muted)]">
             No active campaigns right now.
@@ -65,8 +81,15 @@ export default function AirdropPage() {
         </div>
       ) : (
         <div className="mt-8 grid gap-5 md:grid-cols-2">
-          {active.map((c) => (
-            <CampaignCard key={c.id} campaign={c} />
+          {liveOnchain.map((c) => (
+            <OnchainCampaignCard
+              key={`oc-${c.onchainId}`}
+              campaign={c}
+              localCampaigns={localCampaigns}
+            />
+          ))}
+          {drafts.map((c) => (
+            <DraftCampaignCard key={c.id} campaign={c} />
           ))}
         </div>
       )}
@@ -74,71 +97,121 @@ export default function AirdropPage() {
   );
 }
 
-function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
+/** A live on-chain campaign — claimable by anyone (public) or by whitelist proof. */
+function OnchainCampaignCard({
+  campaign: c,
+  localCampaigns,
+}: {
+  campaign: OnchainCampaign;
+  localCampaigns: AirdropCampaign[];
+}) {
   const connected = useDexStore((s) => s.connected);
-  const address = useDexStore((s) => s.address);
   const recordClaim = useDexStore((s) => s.recordClaim);
   const { open: openWalletModal } = useAppKit();
   const { address: wallet, chainId } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
-  const claimedIds = useClaimedIds();
+  const queryClient = useQueryClient();
   const [claiming, setClaiming] = useState(false);
 
+  // On-chain claim status for the connected wallet (the source of truth).
+  const { data: claimedOnchain } = useReadContract({
+    address: AIRDROP_CONTRACT as `0x${string}`,
+    abi: AIRDROP_ABI,
+    functionName: "hasClaimed",
+    args: wallet ? [BigInt(c.onchainId), wallet] : undefined,
+    chainId: CHAIN_ID,
+    query: { enabled: !!wallet },
+  });
+
   const token = TOKEN_MAP[c.tokenSymbol];
-  // Whitelist wallets carry their own allocation; everyone else uses the default.
-  const wlEntry =
-    c.eligibility === "whitelist" && address
-      ? c.whitelist.find((w) => w.address === address.toLowerCase())
+  const ended = c.endsAtMs !== 0 && isPast(c.endsAtMs);
+  const remainingWei = c.fundedWei - c.claimedWei;
+  const soldOut = c.isPublic
+    ? remainingWei < c.amountPerClaimWei
+    : remainingWei <= 0n;
+  const alreadyClaimed = !!claimedOnchain;
+  const progress =
+    c.funded > 0 ? Math.min(100, (c.claimed / c.funded) * 100) : 0;
+
+  // Whitelist proofs need the (address, amount) list. We read it straight from
+  // the chain (published as an event at launch), so any visitor can claim. The
+  // admin's local store is only a fallback if the event can't be read.
+  const dec = token?.decimals ?? c.tokenDecimals;
+  const { allocations: published } = usePublishedWhitelist(
+    c.onchainId,
+    !c.isPublic,
+  );
+  const localWl = !c.isPublic
+    ? localCampaigns.find((lc) => lc.onchainId === c.onchainId)
+    : undefined;
+
+  const wlAllocs: { address: string; amountWei: string }[] = c.isPublic
+    ? []
+    : published.length > 0
+      ? published
+      : (localWl?.whitelist ?? []).map((w) => ({
+          address: w.address,
+          amountWei: parseUnits(String(w.amount), dec).toString(),
+        }));
+
+  const myAlloc =
+    !c.isPublic && wallet
+      ? wlAllocs.find((a) => a.address.toLowerCase() === wallet.toLowerCase())
       : undefined;
-  const claimAmount = wlEntry?.amount ?? c.amountPerClaim;
-  const claimedAlloc = c.claimedCount * c.amountPerClaim;
-  const progress = Math.min(100, (claimedAlloc / c.totalAllocation) * 100);
-  const ended = isPast(c.endsAt);
-  const soldOut = claimedAlloc + c.amountPerClaim > c.totalAllocation;
-  // Whitelist: admin marking the wallet received also shows as claimed here.
-  const alreadyClaimed = !!wlEntry?.claimed || claimedIds.includes(c.id);
+  const claimAmount = c.isPublic
+    ? c.amountPerClaim
+    : myAlloc
+      ? Number(formatUnits(BigInt(myAlloc.amountWei), dec))
+      : 0;
 
   let eligible = true;
   let reason = "";
-  if (c.eligibility === "whitelist") {
-    eligible = !!wlEntry;
-    reason = "Your wallet is not whitelisted";
+  if (!c.isPublic) {
+    eligible = !!myAlloc;
+    reason =
+      wlAllocs.length === 0
+        ? "Whitelist data isn't available yet"
+        : "Your wallet is not whitelisted";
   }
 
-  // On-chain claim is live once the campaign was launched (has an onchainId)
-  // and a contract address is configured.
-  const isOnchain = airdropLive && c.onchainId != null;
-
   const doClaim = async () => {
-    if (!isOnchain || c.onchainId == null || !wallet || !publicClient) return;
+    if (!wallet || !publicClient) return;
     if (chainId !== CHAIN_ID)
       return toast.error("지갑 네트워크를 BSC로 전환하세요");
-    const tok = TOKEN_MAP[c.tokenSymbol];
-    if (!tok) return;
-    // Rebuild the exact allocation set used at launch to regenerate the proof.
-    const allocs = c.whitelist.map((w) => ({
-      address: w.address,
-      amountWei: parseUnits(String(w.amount), tok.decimals).toString(),
-    }));
-    const pf = merkleProof(allocs, wallet);
-    if (!pf) return toast.error("이 지갑은 화이트리스트에 없습니다");
     try {
       setClaiming(true);
       toast.info("클레임 트랜잭션을 지갑에서 승인하세요");
-      const hash = await writeContractAsync({
-        address: AIRDROP_CONTRACT as `0x${string}`,
-        abi: AIRDROP_ABI,
-        functionName: "claim",
-        args: [BigInt(c.onchainId), BigInt(pf.amountWei), pf.proof],
-        chainId: CHAIN_ID,
-      });
+      let hash: `0x${string}`;
+      if (c.isPublic) {
+        hash = await writeContractAsync({
+          address: AIRDROP_CONTRACT as `0x${string}`,
+          abi: AIRDROP_ABI,
+          functionName: "claimPublic",
+          args: [BigInt(c.onchainId)],
+          chainId: CHAIN_ID,
+        });
+      } else {
+        if (wlAllocs.length === 0)
+          return toast.error("화이트리스트 데이터를 불러올 수 없습니다");
+        const pf = merkleProof(wlAllocs, wallet);
+        if (!pf) return toast.error("이 지갑은 화이트리스트에 없습니다");
+        hash = await writeContractAsync({
+          address: AIRDROP_CONTRACT as `0x${string}`,
+          abi: AIRDROP_ABI,
+          functionName: "claim",
+          args: [BigInt(c.onchainId), BigInt(pf.amountWei), pf.proof],
+          chainId: CHAIN_ID,
+        });
+      }
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") return toast.error("클레임 실패");
-      recordClaim(c.id);
+      recordClaim(c.onchainId.toString());
       toast.success(
         `${claimAmount.toLocaleString()} ${c.tokenSymbol} 클레임 완료!`,
       );
+      // Refresh hasClaimed + on-chain campaign state.
+      queryClient.invalidateQueries();
     } catch {
       toast.error("클레임 실패 — 이미 수령했거나 지갑에서 거부됨");
     } finally {
@@ -146,9 +219,7 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
     }
   };
 
-  // Fallback guards against any legacy persisted campaign (e.g. the removed
-  // "lp" eligibility) so an unknown value can't crash the card.
-  const meta = ELIGIBILITY_META[c.eligibility] ?? ELIGIBILITY_META.public;
+  const canClaim = eligible && !ended && !soldOut && !alreadyClaimed;
 
   return (
     <div className="flex flex-col rounded-3xl border border-[var(--border)] bg-[var(--card)] p-6">
@@ -158,40 +229,44 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
           <div>
             <h3 className="font-semibold">{c.name}</h3>
             <span className="inline-flex items-center gap-1 rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--muted)]">
-              {meta.icon}
-              {meta.label}
+              {c.isPublic ? (
+                <Globe className="h-3.5 w-3.5" />
+              ) : (
+                <Lock className="h-3.5 w-3.5" />
+              )}
+              {c.isPublic ? "Public" : "Whitelist"}
             </span>
           </div>
         </div>
         <span className="text-xs text-[var(--muted)]">
-          {ended ? "Ended" : daysUntil(c.endsAt)}
+          {ended ? "Ended" : c.endsAtMs === 0 ? "No expiry" : daysUntil(c.endsAtMs)}
         </span>
       </div>
-
-      <p className="mt-4 text-sm leading-relaxed text-[var(--muted)]">
-        {c.description}
-      </p>
 
       <div className="mt-5 flex items-end justify-between rounded-2xl bg-[var(--surface)] px-4 py-3">
         <div>
           <p className="text-xs text-[var(--muted)]">
-            {wlEntry ? "Your allocation" : "Reward per wallet"}
+            {!c.isPublic && myAlloc ? "Your allocation" : "Reward per wallet"}
           </p>
           <p className="text-xl font-bold">
-            {claimAmount.toLocaleString()} {c.tokenSymbol}
+            {c.isPublic || myAlloc
+              ? `${claimAmount.toLocaleString()} ${c.tokenSymbol}`
+              : c.tokenSymbol}
           </p>
         </div>
-        <p className="text-sm text-[var(--muted)]">
-          ≈ {formatUsd(claimAmount * (token?.priceUsd ?? 0))}
-        </p>
+        {(c.isPublic || myAlloc) && (
+          <p className="text-sm text-[var(--muted)]">
+            ≈ {formatUsd(claimAmount * (token?.priceUsd ?? 0))}
+          </p>
+        )}
       </div>
 
-      {/* Progress */}
+      {/* Progress (claimed / funded, read from chain) */}
       <div className="mt-4">
         <div className="flex justify-between text-xs text-[var(--muted)]">
           <span>{progress.toFixed(1)}% claimed</span>
           <span>
-            {formatCompact(claimedAlloc)} / {formatCompact(c.totalAllocation)}{" "}
+            {formatCompact(c.claimed)} / {formatCompact(c.funded)}{" "}
             {c.tokenSymbol}
           </span>
         </div>
@@ -203,7 +278,6 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
         </div>
       </div>
 
-      {/* Eligibility hint */}
       {connected && !eligible && !alreadyClaimed && (
         <div className="mt-4 flex items-center gap-2 rounded-xl bg-[var(--down-soft)] px-3 py-2 text-xs text-[var(--down)]">
           <ShieldCheck className="h-3.5 w-3.5" />
@@ -211,7 +285,6 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
         </div>
       )}
 
-      {/* Action */}
       <div className="mt-auto pt-5">
         {!connected ? (
           <button
@@ -228,7 +301,7 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
             <Check className="h-5 w-5" />
             Claimed
           </button>
-        ) : eligible && !ended && !soldOut && isOnchain ? (
+        ) : canClaim ? (
           <button
             onClick={doClaim}
             disabled={claiming}
@@ -244,15 +317,85 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
             disabled
             className="h-12 w-full rounded-2xl bg-[var(--accent)] font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--muted-2)]"
           >
-            {ended
-              ? "Ended"
-              : soldOut
-                ? "Fully claimed"
-                : !eligible
-                  ? "Not eligible"
-                  : "On-chain claims coming soon"}
+            {ended ? "Ended" : soldOut ? "Fully claimed" : "Not eligible"}
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** A local draft not yet launched on-chain — preview only, not claimable. */
+function DraftCampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
+  const token = TOKEN_MAP[c.tokenSymbol];
+  const isWl = c.eligibility === "whitelist";
+  const claimedAlloc = c.claimedCount * c.amountPerClaim;
+  const progress = Math.min(100, (claimedAlloc / c.totalAllocation) * 100);
+  const ended = isPast(c.endsAt);
+
+  return (
+    <div className="flex flex-col rounded-3xl border border-[var(--border)] bg-[var(--card)] p-6">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <TokenLogo symbol={c.tokenSymbol} size={44} />
+          <div>
+            <h3 className="font-semibold">{c.name}</h3>
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--muted)]">
+              {isWl ? (
+                <Lock className="h-3.5 w-3.5" />
+              ) : (
+                <Globe className="h-3.5 w-3.5" />
+              )}
+              {isWl ? "Whitelist" : "Public"}
+            </span>
+          </div>
+        </div>
+        <span className="text-xs text-[var(--muted)]">
+          {ended ? "Ended" : daysUntil(c.endsAt)}
+        </span>
+      </div>
+
+      <p className="mt-4 text-sm leading-relaxed text-[var(--muted)]">
+        {c.description}
+      </p>
+
+      <div className="mt-5 flex items-end justify-between rounded-2xl bg-[var(--surface)] px-4 py-3">
+        <div>
+          <p className="text-xs text-[var(--muted)]">Reward per wallet</p>
+          <p className="text-xl font-bold">
+            {c.amountPerClaim.toLocaleString()} {c.tokenSymbol}
+          </p>
+        </div>
+        <p className="text-sm text-[var(--muted)]">
+          ≈ {formatUsd(c.amountPerClaim * (token?.priceUsd ?? 0))}
+        </p>
+      </div>
+
+      <div className="mt-4">
+        <div className="flex justify-between text-xs text-[var(--muted)]">
+          <span>{progress.toFixed(1)}% claimed</span>
+          <span>
+            {formatCompact(claimedAlloc)} / {formatCompact(c.totalAllocation)}{" "}
+            {c.tokenSymbol}
+          </span>
+        </div>
+        <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-[var(--surface-2)]">
+          <div
+            className="h-full rounded-full bg-[var(--accent)] transition-all"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-auto pt-5">
+        <button
+          disabled
+          className="h-12 w-full rounded-2xl bg-[var(--surface-2)] font-semibold text-[var(--muted-2)]"
+        >
+          {airdropLive
+            ? "온체인 발행 대기 중 (Admin)"
+            : "On-chain claims coming soon"}
+        </button>
       </div>
     </div>
   );

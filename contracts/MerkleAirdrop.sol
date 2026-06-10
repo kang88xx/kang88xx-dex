@@ -2,18 +2,26 @@
 pragma solidity ^0.8.20;
 
 /**
- * MerkleAirdrop — multi-campaign, per-wallet ERC-20 airdrop with Merkle proofs.
+ * MerkleAirdrop — multi-campaign ERC-20 airdrop. Two claim modes per campaign:
+ *
+ *   • Whitelist (merkleRoot != 0): per-wallet (address, amount) allocations
+ *     proven with a Merkle proof. Call claim(id, amount, proof).
+ *   • Public  (merkleRoot == 0): open claim — any wallet claims a fixed
+ *     `amountPerClaim` once, first-come until the campaign is drained. Call
+ *     claimPublic(id). No proof, no off-chain allocation list needed, so every
+ *     visitor can claim straight from the chain.
  *
  * Self-contained (no imports) so it compiles in Remix or with plain solc.
  *
  * Flow:
- *   1. Admin builds a whitelist of (address, amount) pairs off-chain and
- *      computes a Merkle root (see lib/merkle.ts — encoding MUST match below).
+ *   1. (Whitelist) Admin builds (address, amount) pairs off-chain and computes
+ *      a Merkle root (see lib/merkle.ts — encoding MUST match below).
+ *      (Public) Admin picks a fixed amount-per-wallet; no root.
  *   2. Admin approves this contract for `amount` of the reward token, then
- *      calls createCampaign(token, root, amount, endsAt) which pulls the
- *      tokens in and registers the campaign.
- *   3. Each whitelisted user calls claim(id, amount, proof) once and receives
- *      their tokens. Double-claims are blocked on-chain.
+ *      calls createCampaign(token, root, amount, endsAt, amountPerClaim, name)
+ *      which pulls the tokens in and registers the campaign.
+ *   3. Whitelisted users call claim(id, amount, proof); public users call
+ *      claimPublic(id). Either way each wallet claims at most once on-chain.
  *   4. Admin can sweep() unclaimed tokens back out (e.g. after the campaign
  *      ends) and pause/unpause with setActive().
  *
@@ -37,12 +45,13 @@ contract MerkleAirdrop {
     address public owner;
 
     struct Campaign {
-        address token;      // reward ERC-20
-        bytes32 merkleRoot; // root over (account, amount) leaves
-        uint256 funded;     // total tokens deposited on creation
-        uint256 claimed;    // total tokens claimed so far
-        uint64 endsAt;      // unix seconds; 0 = no expiry
-        bool active;        // owner can pause
+        address token;          // reward ERC-20
+        bytes32 merkleRoot;     // root over (account, amount) leaves; 0 = public/open claim
+        uint256 funded;         // total tokens deposited on creation
+        uint256 claimed;        // total tokens claimed so far
+        uint256 amountPerClaim; // fixed reward per wallet for public campaigns (merkleRoot == 0)
+        uint64 endsAt;          // unix seconds; 0 = no expiry
+        bool active;            // owner can pause
     }
 
     uint256 public campaignCount;
@@ -55,10 +64,13 @@ contract MerkleAirdrop {
         address indexed token,
         bytes32 merkleRoot,
         uint256 funded,
-        uint64 endsAt
+        uint64 endsAt,
+        uint256 amountPerClaim,
+        string name
     );
     event Claimed(uint256 indexed id, address indexed account, uint256 amount);
     event Swept(uint256 indexed id, address indexed to, uint256 amount);
+    event WhitelistPublished(uint256 indexed id, address[] accounts, uint256[] amounts);
     event ActiveSet(uint256 indexed id, bool active);
     event OwnerTransferred(address indexed from, address indexed to);
 
@@ -74,16 +86,27 @@ contract MerkleAirdrop {
     /**
      * Create + fund a campaign. The caller (owner) must have approved this
      * contract for at least `amount` of `token` beforehand.
+     *
+     * Pass merkleRoot != 0 for a whitelist campaign (amountPerClaim ignored),
+     * or merkleRoot == 0 for a public/open campaign (amountPerClaim required —
+     * the fixed reward each wallet gets). `name` is emitted in the event only
+     * (not stored) so the frontend can label campaigns read from the chain.
      */
     function createCampaign(
         address token,
         bytes32 merkleRoot,
         uint256 amount,
-        uint64 endsAt
+        uint64 endsAt,
+        uint256 amountPerClaim,
+        string calldata name
     ) external onlyOwner returns (uint256 id) {
         require(token != address(0), "token=0");
-        require(merkleRoot != bytes32(0), "root=0");
         require(amount > 0, "amount=0");
+        // Public campaigns (no root) must define a positive per-wallet reward.
+        if (merkleRoot == bytes32(0)) {
+            require(amountPerClaim > 0, "perClaim=0");
+            require(amountPerClaim <= amount, "perClaim>amount");
+        }
 
         id = ++campaignCount;
         campaigns[id] = Campaign({
@@ -91,6 +114,7 @@ contract MerkleAirdrop {
             merkleRoot: merkleRoot,
             funded: amount,
             claimed: 0,
+            amountPerClaim: amountPerClaim,
             endsAt: endsAt,
             active: true
         });
@@ -99,13 +123,14 @@ contract MerkleAirdrop {
             IERC20(token).transferFrom(msg.sender, address(this), amount),
             "fund failed"
         );
-        emit CampaignCreated(id, token, merkleRoot, amount, endsAt);
+        emit CampaignCreated(id, token, merkleRoot, amount, endsAt, amountPerClaim, name);
     }
 
-    /** Claim your allocation for a campaign. Reverts if already claimed. */
+    /** Whitelist claim: prove your (msg.sender, amount) leaf. Reverts if already claimed. */
     function claim(uint256 id, uint256 amount, bytes32[] calldata proof) external {
         Campaign storage c = campaigns[id];
-        require(c.merkleRoot != bytes32(0), "no campaign");
+        require(c.token != address(0), "no campaign");
+        require(c.merkleRoot != bytes32(0), "use claimPublic"); // public path is claimPublic
         require(c.active, "inactive");
         require(c.endsAt == 0 || block.timestamp <= c.endsAt, "ended");
         require(!hasClaimed[id][msg.sender], "already claimed");
@@ -118,15 +143,48 @@ contract MerkleAirdrop {
         // Effects before interaction (reentrancy-safe).
         hasClaimed[id][msg.sender] = true;
         c.claimed += amount;
+        require(c.claimed <= c.funded, "exhausted");
 
         require(IERC20(c.token).transfer(msg.sender, amount), "transfer failed");
         emit Claimed(id, msg.sender, amount);
     }
 
-    /** Owner reclaims still-unclaimed tokens for a campaign. */
+    /**
+     * Public claim: any wallet claims the campaign's fixed amountPerClaim once,
+     * first-come until funds run out. No proof — the campaign is open by design.
+     */
+    function claimPublic(uint256 id) external {
+        Campaign storage c = campaigns[id];
+        require(c.token != address(0), "no campaign");
+        require(c.merkleRoot == bytes32(0), "use claim"); // whitelist path is claim
+        require(c.active, "inactive");
+        require(c.endsAt == 0 || block.timestamp <= c.endsAt, "ended");
+        require(!hasClaimed[id][msg.sender], "already claimed");
+
+        uint256 amount = c.amountPerClaim;
+        require(c.claimed + amount <= c.funded, "exhausted");
+
+        // Effects before interaction (reentrancy-safe).
+        hasClaimed[id][msg.sender] = true;
+        c.claimed += amount;
+
+        require(IERC20(c.token).transfer(msg.sender, amount), "transfer failed");
+        emit Claimed(id, msg.sender, amount);
+    }
+
+    /**
+     * Owner reclaims still-unclaimed tokens — ONLY after the campaign's end
+     * time has passed. This guarantees claimers a guaranteed window: the owner
+     * cannot pull funds out from under an active campaign (anti-rug). Campaigns
+     * with no end date (endsAt == 0) are intentionally non-sweepable; their
+     * funds stay committed forever.
+     */
     function sweep(uint256 id, address to) external onlyOwner {
         require(to != address(0), "to=0");
         Campaign storage c = campaigns[id];
+        require(c.token != address(0), "no campaign");
+        require(c.endsAt != 0 && block.timestamp > c.endsAt, "not ended");
+
         uint256 left = c.funded - c.claimed;
         require(left > 0, "nothing to sweep");
 
@@ -136,8 +194,25 @@ contract MerkleAirdrop {
         emit Swept(id, to, left);
     }
 
+    /**
+     * Publish a whitelist campaign's (account, amount) allocations as an event —
+     * pure data availability, nothing stored. Lets ANY visitor (not just the
+     * admin who built the list) read the allocations back from the chain and
+     * reconstruct their Merkle proof to claim. Emit-only: gas is the log cost of
+     * the arrays, so split very large whitelists across multiple calls.
+     */
+    function publishWhitelist(
+        uint256 id,
+        address[] calldata accounts,
+        uint256[] calldata amounts
+    ) external onlyOwner {
+        require(campaigns[id].token != address(0), "no campaign");
+        require(accounts.length == amounts.length, "length mismatch");
+        emit WhitelistPublished(id, accounts, amounts);
+    }
+
     function setActive(uint256 id, bool active_) external onlyOwner {
-        require(campaigns[id].merkleRoot != bytes32(0), "no campaign");
+        require(campaigns[id].token != address(0), "no campaign");
         campaigns[id].active = active_;
         emit ActiveSet(id, active_);
     }

@@ -1055,6 +1055,129 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
       </div>
 
       {c.eligibility === "whitelist" && <WhitelistManager campaign={c} />}
+      {c.eligibility === "public" && <PublicLaunchPanel campaign={c} />}
+    </div>
+  );
+}
+
+const ZERO_ROOT =
+  "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
+
+/**
+ * On-chain launch for a PUBLIC campaign: approve the airdrop contract for the
+ * total allocation, then createCampaign with no Merkle root and a fixed
+ * amountPerClaim. Once launched, any wallet can claim from the /airdrop page
+ * (read straight from the chain — no whitelist, no per-user data sharing).
+ * Must be run by the contract owner holding enough reward tokens.
+ */
+function PublicLaunchPanel({ campaign: c }: { campaign: AirdropCampaign }) {
+  const updateCampaign = useDexStore((s) => s.updateCampaign);
+  const { address: wallet, chainId } = useAccount();
+  const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
+  const [launching, setLaunching] = useState(false);
+
+  const locked = c.onchainId != null;
+  const rewardToken = TOKEN_MAP[c.tokenSymbol];
+
+  const launchPublic = async () => {
+    if (!airdropLive)
+      return toast.error("에어드랍 컨트랙트가 아직 배포/설정되지 않았습니다");
+    if (!wallet || !publicClient) return toast.error("지갑을 연결하세요");
+    if (chainId !== CHAIN_ID)
+      return toast.error("지갑 네트워크를 BSC로 전환하세요");
+    if (!rewardToken?.address)
+      return toast.error(
+        `${c.tokenSymbol}는 컨트랙트가 없어 온체인 발행 불가 (네이티브 토큰)`,
+      );
+    if (!(c.amountPerClaim > 0))
+      return toast.error("지갑당 수량(amountPerClaim)이 0보다 커야 합니다");
+    if (c.amountPerClaim > c.totalAllocation)
+      return toast.error("지갑당 수량이 총 할당보다 클 수 없습니다");
+
+    try {
+      setLaunching(true);
+      const decimals = rewardToken.decimals;
+      const totalWei = parseUnits(String(c.totalAllocation), decimals);
+      const perClaimWei = parseUnits(String(c.amountPerClaim), decimals);
+      const endsAtSec = BigInt(Math.floor(c.endsAt / 1000));
+      const tokenAddr = rewardToken.address as `0x${string}`;
+      const contract = AIRDROP_CONTRACT as `0x${string}`;
+
+      toast.info("1/2 토큰 사용 승인 중… 지갑에서 확인하세요");
+      const approveHash = await writeContractAsync({
+        address: tokenAddr,
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [contract, totalWei],
+        chainId: CHAIN_ID,
+      });
+      await publicClient.waitForTransactionReceipt({ hash: approveHash });
+
+      toast.info("2/2 캠페인 생성·충전 중… 지갑에서 확인하세요");
+      const createHash = await writeContractAsync({
+        address: contract,
+        abi: AIRDROP_ABI,
+        functionName: "createCampaign",
+        // Public campaign: zero root + fixed amountPerClaim. Anyone claims once.
+        args: [tokenAddr, ZERO_ROOT, totalWei, endsAtSec, perClaimWei, c.name],
+        chainId: CHAIN_ID,
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({
+        hash: createHash,
+      });
+      if (receipt.status !== "success")
+        return toast.error("온체인 생성 트랜잭션 실패");
+
+      const logs = parseEventLogs({
+        abi: AIRDROP_ABI,
+        eventName: "CampaignCreated",
+        logs: receipt.logs,
+      });
+      const id = logs.length ? Number(logs[0].args.id) : undefined;
+      if (id === undefined)
+        return toast.error("캠페인 ID를 읽지 못했습니다 (수동 확인 필요)");
+
+      updateCampaign(c.id, { onchainId: id });
+      toast.success(`온체인 퍼블릭 캠페인 #${id} 발행·충전 완료 — 이제 클레임 가능`);
+    } catch {
+      toast.error(
+        "온체인 발행 실패 — 지갑 거부 / 잔액 부족 / 소유자 아님 등을 확인하세요",
+      );
+    } finally {
+      setLaunching(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-2xl bg-[var(--surface)] p-4">
+      {locked ? (
+        <div className="flex items-center gap-2 rounded-xl border border-[var(--up)]/30 bg-[var(--up-soft)] px-3 py-2 text-xs font-medium text-[var(--up)]">
+          <Check className="h-4 w-4" />
+          온체인 발행됨 · 캠페인 #{c.onchainId} — 누구나 {c.amountPerClaim.toLocaleString()}{" "}
+          {c.tokenSymbol} 클레임 가능
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2">
+          <span className="text-xs text-[var(--muted)]">
+            {airdropLive
+              ? `준비되면 온체인 발행 — 지갑당 ${c.amountPerClaim.toLocaleString()} ${c.tokenSymbol} × (총 ${c.totalAllocation.toLocaleString()})를 컨트랙트에 충전하고 누구나 클레임할 수 있게 엽니다.`
+              : "온체인 발행하려면 먼저 에어드랍 컨트랙트를 배포하세요 (npm run deploy:airdrop)."}
+          </span>
+          <button
+            onClick={launchPublic}
+            disabled={!airdropLive || launching}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {launching ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Rocket className="h-3.5 w-3.5" />
+            )}
+            {launching ? "발행 중…" : "온체인 발행"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1167,7 +1290,7 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
       const tokenAddr = rewardToken.address as `0x${string}`;
       const contract = AIRDROP_CONTRACT as `0x${string}`;
 
-      toast.info("1/2 토큰 사용 승인 중… 지갑에서 확인하세요");
+      toast.info("1/3 토큰 사용 승인 중… 지갑에서 확인하세요");
       const approveHash = await writeContractAsync({
         address: tokenAddr,
         abi: erc20Abi,
@@ -1177,12 +1300,14 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
       });
       await publicClient.waitForTransactionReceipt({ hash: approveHash });
 
-      toast.info("2/2 캠페인 생성·충전 중… 지갑에서 확인하세요");
+      toast.info("2/3 캠페인 생성·충전 중… 지갑에서 확인하세요");
       const createHash = await writeContractAsync({
         address: contract,
         abi: AIRDROP_ABI,
         functionName: "createCampaign",
-        args: [tokenAddr, root, totalWei, endsAtSec],
+        // Whitelist campaign: amountPerClaim is unused on-chain (0); each wallet's
+        // amount lives in the Merkle proof. Name is emitted for the claim page.
+        args: [tokenAddr, root, totalWei, endsAtSec, 0n, c.name],
         chainId: CHAIN_ID,
       });
       const receipt = await publicClient.waitForTransactionReceipt({
@@ -1200,8 +1325,26 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
       if (id === undefined)
         return toast.error("캠페인 ID를 읽지 못했습니다 (수동 확인 필요)");
 
+      // Publish the allocation list on-chain (event-only) so any visitor can
+      // rebuild their proof and claim — solves the whitelist data-sharing gap.
+      toast.info("3/3 화이트리스트 공개 중… 지갑에서 확인하세요");
+      const publishHash = await writeContractAsync({
+        address: contract,
+        abi: AIRDROP_ABI,
+        functionName: "publishWhitelist",
+        args: [
+          BigInt(id),
+          allocs.map((a) => a.address as `0x${string}`),
+          allocs.map((a) => BigInt(a.amountWei)),
+        ],
+        chainId: CHAIN_ID,
+      });
+      await publicClient.waitForTransactionReceipt({ hash: publishHash });
+
       updateCampaign(c.id, { onchainId: id });
-      toast.success(`온체인 캠페인 #${id} 발행·충전 완료 — 이제 클레임 가능`);
+      toast.success(
+        `온체인 캠페인 #${id} 발행·충전·공개 완료 — 누구나 클레임 가능`,
+      );
     } catch {
       toast.error(
         "온체인 발행 실패 — 지갑 거부 / 잔액 부족 / 소유자 아님 등을 확인하세요",
