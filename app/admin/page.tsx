@@ -31,6 +31,7 @@ import {
 import { useDexStore, useHydrated } from "@/lib/store";
 import { useTokenRegistry, tokenTradable } from "@/lib/token-registry";
 import { usePoolStats } from "@/lib/pool-stats";
+import { useCampaignAdmin, campaignId } from "@/lib/campaigns";
 import { CHAIN_ID } from "@/lib/chain";
 import { TOKEN_MAP } from "@/lib/tokens";
 import { merkleRoot } from "@/lib/merkle";
@@ -256,7 +257,7 @@ function AdminLogin() {
 }
 
 function AdminDashboard() {
-  const campaigns = useDexStore((s) => s.campaigns);
+  const { campaigns } = useCampaignAdmin();
   const queryClient = useQueryClient();
 
   const logout = async () => {
@@ -809,7 +810,7 @@ function AnalyticsPanel() {
 }
 
 function CampaignForm() {
-  const createCampaign = useDexStore((s) => s.createCampaign);
+  const { create } = useCampaignAdmin();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [tokenSymbol, setTokenSymbol] = useState("IOI");
@@ -844,7 +845,10 @@ function CampaignForm() {
     if (!Number.isFinite(days) || days <= 0 || days > 3650)
       return toast.error("Duration must be 1–3650 days");
 
-    createCampaign({
+    create({
+      id: campaignId(),
+      claimedCount: 0,
+      createdAt: Date.now(),
       name: name.trim(),
       description:
         description.trim() || "Claim your reward from this campaign.",
@@ -855,7 +859,7 @@ function CampaignForm() {
       whitelist: [],
       active: true,
       endsAt: Date.now() + days * DAY,
-    });
+    }).catch(() => toast.error("저장 실패 — 다시 시도하세요"));
     toast.success(`Created "${name.trim()}"`);
     reset();
   };
@@ -973,8 +977,13 @@ function CampaignForm() {
 }
 
 function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
-  const updateCampaign = useDexStore((s) => s.updateCampaign);
-  const deleteCampaign = useDexStore((s) => s.deleteCampaign);
+  const { remove, updateOne } = useCampaignAdmin();
+  const updateCampaign = (id: string, patch: Partial<AirdropCampaign>) =>
+    updateOne(id, (x) => ({ ...x, ...patch })).catch(() =>
+      toast.error("저장 실패"),
+    );
+  const deleteCampaign = (id: string) =>
+    remove(id).catch(() => toast.error("삭제 실패"));
   // Whitelist campaigns track claims per-wallet; others use the flat counter.
   const isWl = c.eligibility === "whitelist";
   const wlClaimed = c.whitelist.filter((w) => w.claimed);
@@ -1090,10 +1099,45 @@ function parseBulk(text: string, defaultAmount: number): ParsedRow[] {
 
 function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
   const address = useDexStore((s) => s.address);
-  const addManyToWhitelist = useDexStore((s) => s.addManyToWhitelist);
-  const removeFromWhitelist = useDexStore((s) => s.removeFromWhitelist);
-  const setWhitelistClaimed = useDexStore((s) => s.setWhitelistClaimed);
-  const updateCampaign = useDexStore((s) => s.updateCampaign);
+  const { updateOne } = useCampaignAdmin();
+  const fail = () => toast.error("저장 실패 — 다시 시도하세요");
+
+  // Backend-backed whitelist mutations (shared across all users).
+  const addManyToWhitelist = (
+    id: string,
+    entries: { address: string; amount: number }[],
+  ) =>
+    updateOne(id, (x) => {
+      const map = new Map(x.whitelist.map((w) => [w.address, { ...w }]));
+      for (const e of entries) {
+        const addr = e.address.trim().toLowerCase();
+        if (!addr || !Number.isFinite(e.amount) || e.amount <= 0) continue;
+        const ex = map.get(addr);
+        if (ex) ex.amount += e.amount;
+        else map.set(addr, { address: addr, amount: e.amount, claimed: false });
+      }
+      return { ...x, whitelist: [...map.values()] };
+    }).catch(fail);
+
+  const removeFromWhitelist = (id: string, addr: string) =>
+    updateOne(id, (x) => ({
+      ...x,
+      whitelist: x.whitelist.filter((w) => w.address !== addr.toLowerCase()),
+    })).catch(fail);
+
+  const setWhitelistClaimed = (id: string, addr: string, claimed: boolean) =>
+    updateOne(id, (x) => ({
+      ...x,
+      whitelist: x.whitelist.map((w) =>
+        w.address === addr.toLowerCase()
+          ? { ...w, claimed, claimedAt: claimed ? Date.now() : undefined }
+          : w,
+      ),
+    })).catch(fail);
+
+  const updateCampaign = (id: string, patch: Partial<AirdropCampaign>) =>
+    updateOne(id, (x) => ({ ...x, ...patch })).catch(fail);
+
   const { address: wallet, chainId } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();

@@ -5,9 +5,15 @@ import Link from "next/link";
 import { useAppKit } from "@reown/appkit/react";
 import { Gift, Check, Lock, Globe, ShieldCheck, Loader2 } from "lucide-react";
 import { parseUnits } from "viem";
-import { useAccount, usePublicClient, useWriteContract } from "wagmi";
+import {
+  useAccount,
+  usePublicClient,
+  useReadContract,
+  useWriteContract,
+} from "wagmi";
 import { TOKEN_MAP } from "@/lib/mock-data";
-import { useClaimedIds, useDexStore, useHydrated } from "@/lib/store";
+import { useDexStore, useHydrated } from "@/lib/store";
+import { useCampaigns } from "@/lib/campaigns";
 import { daysUntil, formatCompact, formatUsd, isPast } from "@/lib/format";
 import { merkleProof } from "@/lib/merkle";
 import { AIRDROP_ABI, AIRDROP_CONTRACT, airdropLive, CHAIN_ID } from "@/lib/airdrop";
@@ -26,8 +32,9 @@ const ELIGIBILITY_META: Record<
 
 export default function AirdropPage() {
   const hydrated = useHydrated();
-  const campaigns = useDexStore((s) => s.campaigns);
+  const { data: campaigns = [], isLoading } = useCampaigns();
   const active = campaigns.filter((c) => c.active);
+  const loading = !hydrated || isLoading;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
@@ -46,7 +53,7 @@ export default function AirdropPage() {
         </div>
       </div>
 
-      {!hydrated ? (
+      {loading ? (
         <div className="mt-8 grid gap-5 md:grid-cols-2">
           <div className="h-64 rounded-3xl bg-[var(--surface-2)] animate-pulse-soft" />
           <div className="h-64 rounded-3xl bg-[var(--surface-2)] animate-pulse-soft" />
@@ -77,13 +84,24 @@ export default function AirdropPage() {
 function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
   const connected = useDexStore((s) => s.connected);
   const address = useDexStore((s) => s.address);
-  const recordClaim = useDexStore((s) => s.recordClaim);
   const { open: openWalletModal } = useAppKit();
   const { address: wallet, chainId } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
-  const claimedIds = useClaimedIds();
   const [claiming, setClaiming] = useState(false);
+
+  // On-chain claim is live once the campaign was launched (has an onchainId)
+  // and a contract address is configured.
+  const isOnchain = airdropLive && c.onchainId != null;
+
+  // Real claimed state comes from the contract (shared across all browsers).
+  const { data: claimedOnchain, refetch: refetchClaimed } = useReadContract({
+    address: AIRDROP_CONTRACT as `0x${string}`,
+    abi: AIRDROP_ABI,
+    functionName: "hasClaimed",
+    args: c.onchainId != null && wallet ? [BigInt(c.onchainId), wallet] : undefined,
+    query: { enabled: isOnchain && !!wallet },
+  });
 
   const token = TOKEN_MAP[c.tokenSymbol];
   // Whitelist wallets carry their own allocation; everyone else uses the default.
@@ -96,8 +114,8 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
   const progress = Math.min(100, (claimedAlloc / c.totalAllocation) * 100);
   const ended = isPast(c.endsAt);
   const soldOut = claimedAlloc + c.amountPerClaim > c.totalAllocation;
-  // Whitelist: admin marking the wallet received also shows as claimed here.
-  const alreadyClaimed = !!wlEntry?.claimed || claimedIds.includes(c.id);
+  // On-chain truth when launched; else the admin "received" mark.
+  const alreadyClaimed = isOnchain ? !!claimedOnchain : !!wlEntry?.claimed;
 
   let eligible = true;
   let reason = "";
@@ -105,10 +123,6 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
     eligible = !!wlEntry;
     reason = "Your wallet is not whitelisted";
   }
-
-  // On-chain claim is live once the campaign was launched (has an onchainId)
-  // and a contract address is configured.
-  const isOnchain = airdropLive && c.onchainId != null;
 
   const doClaim = async () => {
     if (!isOnchain || c.onchainId == null || !wallet || !publicClient) return;
@@ -135,7 +149,7 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
       });
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") return toast.error("클레임 실패");
-      recordClaim(c.id);
+      refetchClaimed();
       toast.success(
         `${claimAmount.toLocaleString()} ${c.tokenSymbol} 클레임 완료!`,
       );
