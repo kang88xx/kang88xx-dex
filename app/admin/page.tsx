@@ -13,6 +13,10 @@ import {
   Power,
   Coins,
   Droplets,
+  Check,
+  Users,
+  Wallet,
+  TrendingUp,
 } from "lucide-react";
 import { TOKENS } from "@/lib/mock-data";
 import { useDexStore, useHydrated } from "@/lib/store";
@@ -157,6 +161,8 @@ function AdminDashboard() {
           Exit admin
         </button>
       </div>
+
+      <AnalyticsPanel />
 
       <div className="mt-8 grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-2">
@@ -529,6 +535,78 @@ function SwapTokensManager() {
   );
 }
 
+interface AnalyticsSummary {
+  day: string;
+  visitors: number;
+  connections: number;
+  volumeUsd: number;
+}
+
+function AnalyticsPanel() {
+  const { data } = useQuery<AnalyticsSummary>({
+    queryKey: ["admin-analytics"],
+    queryFn: async () => {
+      const res = await fetch("/api/analytics");
+      if (!res.ok) throw new Error("analytics fetch failed");
+      return res.json();
+    },
+    refetchInterval: 30_000,
+  });
+
+  const num = (n: number | undefined) =>
+    n === undefined ? "—" : n.toLocaleString();
+
+  const cards = [
+    {
+      label: "방문자 (오늘)",
+      value: num(data?.visitors),
+      icon: <Users className="h-4 w-4" />,
+    },
+    {
+      label: "지갑 연결 (오늘)",
+      value: num(data?.connections),
+      icon: <Wallet className="h-4 w-4" />,
+    },
+    {
+      label: "거래량 (금일)",
+      value:
+        data === undefined
+          ? "—"
+          : formatUsd(data.volumeUsd, { compact: true }),
+      icon: <TrendingUp className="h-4 w-4" />,
+    },
+  ];
+
+  return (
+    <div className="mt-8">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Today · 한국시간 (KST 00:00–24:00)</h2>
+        {data && (
+          <span className="font-mono text-xs text-[var(--muted-2)]">
+            {data.day}
+          </span>
+        )}
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        {cards.map((c) => (
+          <div
+            key={c.label}
+            className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5"
+          >
+            <div className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+              <span className="text-[var(--accent)]">{c.icon}</span>
+              {c.label}
+            </div>
+            <div className="mt-2 text-2xl font-bold tabular-nums">
+              {c.value}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CampaignForm() {
   const createCampaign = useDexStore((s) => s.createCampaign);
   const pools = useDexStore((s) => s.pools);
@@ -706,7 +784,13 @@ function CampaignForm() {
 function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
   const updateCampaign = useDexStore((s) => s.updateCampaign);
   const deleteCampaign = useDexStore((s) => s.deleteCampaign);
-  const claimedAlloc = c.claimedCount * c.amountPerClaim;
+  // Whitelist campaigns track claims per-wallet; others use the flat counter.
+  const isWl = c.eligibility === "whitelist";
+  const wlClaimed = c.whitelist.filter((w) => w.claimed);
+  const claimsCount = isWl ? wlClaimed.length : c.claimedCount;
+  const claimedAlloc = isWl
+    ? wlClaimed.reduce((sum, w) => sum + w.amount, 0)
+    : c.claimedCount * c.amountPerClaim;
 
   return (
     <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5">
@@ -754,7 +838,10 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
       </div>
 
       <div className="mt-3 grid grid-cols-3 gap-3 border-t border-[var(--border)] pt-3 text-center">
-        <Mini label="Claims" value={String(c.claimedCount)} />
+        <Mini
+          label={isWl ? "Received" : "Claims"}
+          value={isWl ? `${claimsCount}/${c.whitelist.length}` : String(claimsCount)}
+        />
         <Mini
           label="Distributed"
           value={`${claimedAlloc.toLocaleString()} ${c.tokenSymbol}`}
@@ -778,29 +865,54 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
   const address = useDexStore((s) => s.address);
   const addToWhitelist = useDexStore((s) => s.addToWhitelist);
   const removeFromWhitelist = useDexStore((s) => s.removeFromWhitelist);
+  const setWhitelistClaimed = useDexStore((s) => s.setWhitelistClaimed);
   const [input, setInput] = useState("");
+  const [amount, setAmount] = useState(String(c.amountPerClaim));
 
   const add = (addr: string) => {
     const a = addr.trim();
     if (!a) return;
     if (!/^0x[a-fA-F0-9]{40}$/.test(a))
       return toast.error("Invalid EVM address");
-    addToWhitelist(c.id, a);
-    toast.success(`Whitelisted ${shortAddress(a)}`);
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0)
+      return toast.error("Enter a token amount");
+    if (c.whitelist.some((w) => w.address === a.toLowerCase()))
+      return toast.error("Wallet already whitelisted");
+    addToWhitelist(c.id, a, amt);
+    toast.success(`Whitelisted ${shortAddress(a)} · ${amt} ${c.tokenSymbol}`);
     setInput("");
   };
 
+  const totalAllocated = c.whitelist.reduce((sum, w) => sum + w.amount, 0);
+
   return (
     <div className="mt-4 rounded-2xl bg-[var(--surface)] p-4">
-      <p className="text-xs font-semibold text-[var(--muted)]">
-        Whitelist ({c.whitelist.length})
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-[var(--muted)]">
+          Whitelist ({c.whitelist.length})
+        </p>
+        <p className="text-xs text-[var(--muted-2)]">
+          {totalAllocated.toLocaleString()} {c.tokenSymbol} allocated
+        </p>
+      </div>
+
+      {/* Add wallet + per-wallet amount */}
       <div className="mt-2 flex gap-2">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add(input)}
           placeholder="0x… wallet address"
           className="w-full rounded-xl border border-[var(--border-strong)] bg-[var(--card)] px-3 py-2 font-mono text-xs outline-none focus:border-[var(--accent)]"
+        />
+        <input
+          type="number"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="Amount"
+          title={`Token amount for this wallet (${c.tokenSymbol})`}
+          className="w-28 shrink-0 rounded-xl border border-[var(--border-strong)] bg-[var(--card)] px-3 py-2 text-xs outline-none focus:border-[var(--accent)]"
         />
         <button
           onClick={() => add(input)}
@@ -819,21 +931,44 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
         </button>
       )}
 
+      {/* Entries: per-wallet amount + received toggle */}
       {c.whitelist.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 space-y-1.5">
           {c.whitelist.map((w) => (
-            <span
-              key={w}
-              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 font-mono text-xs"
+            <div
+              key={w.address}
+              className="flex items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs"
             >
-              {shortAddress(w)}
-              <button
-                onClick={() => removeFromWhitelist(c.id, w)}
-                className="text-[var(--muted)] hover:text-[var(--down)]"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
+              <span className="font-mono">{shortAddress(w.address)}</span>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold tabular-nums">
+                  {w.amount.toLocaleString()} {c.tokenSymbol}
+                </span>
+                <button
+                  onClick={() =>
+                    setWhitelistClaimed(c.id, w.address, !w.claimed)
+                  }
+                  title={
+                    w.claimed ? "Mark as not received" : "Mark as received"
+                  }
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                    w.claimed
+                      ? "bg-[var(--up-soft)] text-[var(--up)]"
+                      : "bg-[var(--surface-2)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                  }`}
+                >
+                  {w.claimed && <Check className="h-3 w-3" />}
+                  {w.claimed ? "Received" : "Pending"}
+                </button>
+                <button
+                  onClick={() => removeFromWhitelist(c.id, w.address)}
+                  className="text-[var(--muted)] hover:text-[var(--down)]"
+                  title="Remove"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       )}

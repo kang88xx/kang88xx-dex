@@ -209,6 +209,15 @@ export function SwapCard() {
       await settleTx(hash, () => {
         toast.success(summary);
         recordTransaction("swap", summary);
+        // Report USD volume for the admin analytics panel (best-effort).
+        const volumeUsd = amountNum * pFrom;
+        if (volumeUsd > 0) {
+          fetch("/api/analytics", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ event: "swap", volumeUsd }),
+          }).catch(() => {});
+        }
         setAmount("");
       });
     } catch {

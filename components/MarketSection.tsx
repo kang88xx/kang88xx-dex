@@ -6,6 +6,7 @@ import { useMarketTokens } from "@/lib/market";
 import { formatCompact, formatPercent, formatUsd } from "@/lib/format";
 import { TokenLogo } from "@/components/TokenLogo";
 import { PriceChart, Sparkline } from "@/components/PriceChart";
+import { AddToWalletButton } from "@/components/AddToWalletButton";
 import { Eyebrow } from "@/components/ui";
 
 export function MarketSection() {
@@ -22,29 +23,48 @@ export function MarketSection() {
 
       {/* Chart card */}
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 sm:p-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <TokenLogo symbol={token.symbol} size={40} />
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-semibold">{token.name}</h2>
-                <span className="text-sm text-[var(--muted)]">
-                  {token.symbol}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-2xl font-bold tracking-tight">
-                  {formatUsd(token.priceUsd)}
-                </span>
-                <span
-                  className="text-sm font-medium"
-                  style={{
-                    color: token.change24h >= 0 ? "var(--up)" : "var(--down)",
-                  }}
-                >
-                  {formatPercent(token.change24h)}
-                </span>
-              </div>
+        <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <TokenLogo symbol={token.symbol} size={22} />
+              <h2 className="text-base font-semibold">{token.name}</h2>
+              <span className="text-sm text-[var(--muted)]">
+                {token.symbol}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-bold tracking-tight">
+                {formatUsd(token.priceUsd)}
+              </span>
+              <span
+                className="text-sm font-medium"
+                style={{
+                  color: token.change24h >= 0 ? "var(--up)" : "var(--down)",
+                }}
+              >
+                {formatPercent(token.change24h)}
+              </span>
+            </div>
+          </div>
+
+          {/* Stats — aligned to the right end of the header */}
+          <div className="flex items-start gap-6 sm:gap-8">
+            <Metric
+              label="Market cap"
+              value={formatUsd(token.marketCap, { compact: true })}
+            />
+            <Metric
+              label="24h volume"
+              value={formatUsd(token.volume24h, { compact: true })}
+            />
+            <div className="flex flex-col items-start gap-1.5">
+              <Metric
+                label="Contract"
+                value={token.address ? `${token.address.slice(0, 8)}…` : "Native"}
+                mono
+                small
+              />
+              <AddToWalletButton symbol={token.symbol} />
             </div>
           </div>
         </div>
@@ -55,23 +75,6 @@ export function MarketSection() {
             range={range}
             onRangeChange={setRange}
             height={240}
-          />
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-4 border-t border-[var(--border)] pt-4 sm:grid-cols-4">
-          <Metric
-            label="Market cap"
-            value={formatUsd(token.marketCap, { compact: true })}
-          />
-          <Metric
-            label="24h volume"
-            value={formatUsd(token.volume24h, { compact: true })}
-          />
-          <Metric label="24h change" value={formatPercent(token.change24h)} />
-          <Metric
-            label="Contract"
-            value={token.address ? `${token.address.slice(0, 8)}…` : "Native"}
-            mono
           />
         </div>
       </div>
@@ -164,15 +167,21 @@ function Metric({
   label,
   value,
   mono,
+  small,
 }: {
   label: string;
   value: string;
   mono?: boolean;
+  small?: boolean;
 }) {
   return (
     <div>
       <div className="text-xs text-[var(--muted)]">{label}</div>
-      <div className={`mt-0.5 font-semibold ${mono ? "font-mono text-sm" : ""}`}>
+      <div
+        className={`mt-0.5 font-semibold ${mono ? "font-mono" : ""} ${
+          small ? "text-xs" : mono ? "text-sm" : ""
+        }`}
+      >
         {value}
       </div>
     </div>

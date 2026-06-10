@@ -9,11 +9,22 @@ import { formatNumber, shortAddress, timeAgoPure } from "@/lib/format";
 import { Eyebrow } from "@/components/ui";
 import { TokenLogo } from "@/components/TokenLogo";
 import { TOKEN_MAP } from "@/lib/tokens";
-import { CHAIN_LABEL } from "@/lib/chain";
+import { CHAIN_LABEL, IS_TESTNET } from "@/lib/chain";
 
-// Active-network USDT contract (mainnet canonical or your testnet test USDT).
-const USDT_ADDRESS = TOKEN_MAP.USDT?.address ?? "not deployed on this network";
-const QUICK_CHIPS = [1, 5, 10, 50];
+// KANG meme-coin contract on the active network — the token used for game bets.
+const KANG_ADDRESS = TOKEN_MAP.KANG?.address ?? "not deployed on this network";
+
+// Game fee destinations (display only until on-chain payouts ship).
+const FEE_WALLETS = {
+  treasury: "0x44414D1Ff9e4aFC08503CEDBb43Ab6ef201acb91",
+  burn: "0x2c151C3FD184045396D4339426a77E367A684Af1",
+};
+const EXPLORER = IS_TESTNET
+  ? "https://testnet.bscscan.com"
+  : "https://bscscan.com";
+
+// Meme-coin bet sizes (KANG trades for fractions of a cent).
+const QUICK_CHIPS = [100, 500, 1000, 5000];
 
 function mmss(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
@@ -33,9 +44,9 @@ export default function GamesPage() {
   const lmsEnsureRound = useDexStore((s) => s.lmsEnsureRound);
   const lmsCheckExpiry = useDexStore((s) => s.lmsCheckExpiry);
   const lmsBotTick = useDexStore((s) => s.lmsBotTick);
-  const usdt = useBalance("USDT");
+  const kang = useBalance("KANG");
 
-  const [amount, setAmount] = useState("5");
+  const [amount, setAmount] = useState("100");
   // nowMs drives both the countdown display and timeAgoPure calls — pure render
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [srAnnounce, setSrAnnounce] = useState<{ id: number; message: string } | null>(null);
@@ -76,7 +87,7 @@ export default function GamesPage() {
   const parsedAmt = parseFloat(amount);
   const betAmt = Number.isFinite(parsedAmt) ? parsedAmt : 0;
   const isActive = round.status === "active";
-  const overBalance = hydrated && connected && betAmt > usdt;
+  const overBalance = hydrated && connected && betAmt > kang;
 
   // Pure derivations — no Date.now() in render
   const remainingMs = Math.max(0, round.endsAt - nowMs);
@@ -132,7 +143,7 @@ export default function GamesPage() {
   }, [myClaims.length]);
 
   const maxBet = () =>
-    setAmount(usdt > 0 ? String(Math.floor(usdt)) : "0");
+    setAmount(kang > 0 ? String(Math.floor(kang)) : "0");
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -162,11 +173,11 @@ export default function GamesPage() {
         </div>
 
         <div
-          title={`${CHAIN_LABEL} USDT · ${USDT_ADDRESS}`}
+          title={`${CHAIN_LABEL} KANG · ${KANG_ADDRESS}`}
           className="hidden items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs sm:flex"
         >
-          <TokenLogo symbol="USDT" size={18} />
-          <span className="font-semibold">USDT</span>
+          <TokenLogo symbol="KANG" size={18} />
+          <span className="font-semibold">KANG</span>
           <span className="text-[var(--muted)]">·</span>
           <span className="font-mono text-[var(--muted)]">BSC</span>
         </div>
@@ -217,7 +228,7 @@ export default function GamesPage() {
         <StatCard
           icon={<TrendingUp className="h-4 w-4" />}
           label="Prize Pool"
-          value={`${formatNumber(round.prizePool, 2)} USDT`}
+          value={`${formatNumber(round.prizePool, 2)} KANG`}
           detail="80% of bets"
           accent
         />
@@ -236,7 +247,7 @@ export default function GamesPage() {
         <StatCard
           icon={<Flame className="h-4 w-4" />}
           label="Burned"
-          value={`${formatNumber(round.burnedPool, 2)} USDT`}
+          value={`${formatNumber(round.burnedPool, 2)} KANG`}
           detail="5% of bets"
         />
       </div>
@@ -262,7 +273,7 @@ export default function GamesPage() {
                         Round #{claim.roundId.slice(-4)}
                       </span>
                       <span className="font-semibold">
-                        {claim.amount.toFixed(2)} USDT
+                        {claim.amount.toFixed(2)} KANG
                       </span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -272,7 +283,7 @@ export default function GamesPage() {
                       <button
                         disabled
                         title="On-chain payouts coming soon"
-                        aria-label={`Claim ${claim.amount.toFixed(2)} USDT from round ${claim.roundId.slice(-4)} — on-chain payouts coming soon`}
+                        aria-label={`Claim ${claim.amount.toFixed(2)} KANG from round ${claim.roundId.slice(-4)} — on-chain payouts coming soon`}
                         className="cursor-not-allowed rounded-xl bg-[var(--surface-2)] px-3 py-1.5 text-xs font-semibold text-[var(--muted-2)]"
                       >
                         Claim
@@ -299,7 +310,7 @@ export default function GamesPage() {
                       overBalance ? "font-semibold text-[var(--down)]" : ""
                     }
                   >
-                    {hydrated && connected ? formatNumber(usdt, 2) : "—"} USDT
+                    {hydrated && connected ? formatNumber(kang, 2) : "—"} KANG
                   </span>
                 </span>
               </div>
@@ -315,7 +326,7 @@ export default function GamesPage() {
                   className="w-full bg-transparent text-2xl font-semibold outline-none placeholder:text-[var(--muted-2)]"
                 />
                 <span className="text-sm font-semibold text-[var(--muted)]">
-                  USDT
+                  KANG
                 </span>
               </div>
               <div className="mt-2 flex gap-2 flex-wrap">
@@ -325,7 +336,7 @@ export default function GamesPage() {
                     onClick={() => setAmount(String(v))}
                     className="rounded-lg bg-[var(--card)] px-2.5 py-1 text-xs font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)]"
                   >
-                    ${v}
+                    {v}
                   </button>
                 ))}
                 <button
@@ -345,7 +356,7 @@ export default function GamesPage() {
               </span>
               <span className="font-semibold">
                 {betAmt > 0
-                  ? `${formatNumber(previewPrize, 2)} USDT`
+                  ? `${formatNumber(previewPrize, 2)} KANG`
                   : "—"}
               </span>
             </div>
@@ -369,9 +380,9 @@ export default function GamesPage() {
                   {!isActive
                     ? "Round ended"
                     : overBalance
-                      ? "Insufficient USDT"
+                      ? "Insufficient KANG"
                       : betAmt < LMS_CONFIG.MIN_BET
-                        ? `Minimum ${LMS_CONFIG.MIN_BET} USDT`
+                        ? `Minimum ${LMS_CONFIG.MIN_BET} KANG`
                         : "On-chain game coming soon"}
                 </button>
               )}
@@ -403,28 +414,20 @@ export default function GamesPage() {
                 title="5% Burn"
               />
             </div>
-            <div className="mt-3 flex gap-4 text-xs text-[var(--muted)]">
-              <span className="flex items-center gap-1.5">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: "var(--accent)" }}
-                />
-                Prize 80%
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: "var(--up)" }}
-                />
-                Treasury 15%
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: "var(--down)" }}
-                />
-                Burn 5%
-              </span>
+            <div className="mt-3 flex flex-col gap-2 text-xs text-[var(--muted)]">
+              <LegendRow color="var(--accent)" label="Prize" pct="80%" />
+              <LegendRow
+                color="var(--up)"
+                label="Treasury"
+                pct="15%"
+                address={FEE_WALLETS.treasury}
+              />
+              <LegendRow
+                color="var(--down)"
+                label="Burn"
+                pct="5%"
+                address={FEE_WALLETS.burn}
+              />
             </div>
           </div>
         </div>
@@ -529,6 +532,41 @@ export default function GamesPage() {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function LegendRow({
+  color,
+  label,
+  pct,
+  address,
+}: {
+  color: string;
+  label: string;
+  pct: string;
+  address?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="flex items-center gap-1.5">
+        <span
+          className="inline-block h-2.5 w-2.5 rounded-full"
+          style={{ backgroundColor: color }}
+        />
+        {label} {pct}
+      </span>
+      {address && (
+        <a
+          href={`${EXPLORER}/address/${address}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={address}
+          className="font-mono text-[var(--muted-2)] transition-colors hover:text-[var(--foreground)]"
+        >
+          {shortAddress(address)}
+        </a>
+      )}
+    </div>
+  );
+}
 
 function StatCard({
   icon,

@@ -51,3 +51,6 @@ next-env.d.ts
 # keep the env templates tracked
 !.env.example
 !.env.deploy.example
+
+# runtime analytics counters (lib/analytics-store.ts)
+.data/

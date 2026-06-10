@@ -89,16 +89,23 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
   const positions = usePositions();
 
   const token = TOKEN_MAP[c.tokenSymbol];
+  // Whitelist wallets carry their own allocation; everyone else uses the default.
+  const wlEntry =
+    c.eligibility === "whitelist" && address
+      ? c.whitelist.find((w) => w.address === address.toLowerCase())
+      : undefined;
+  const claimAmount = wlEntry?.amount ?? c.amountPerClaim;
   const claimedAlloc = c.claimedCount * c.amountPerClaim;
   const progress = Math.min(100, (claimedAlloc / c.totalAllocation) * 100);
   const ended = isPast(c.endsAt);
   const soldOut = claimedAlloc + c.amountPerClaim > c.totalAllocation;
-  const alreadyClaimed = claimedIds.includes(c.id);
+  // Whitelist: admin marking the wallet received also shows as claimed here.
+  const alreadyClaimed = !!wlEntry?.claimed || claimedIds.includes(c.id);
 
   let eligible = true;
   let reason = "";
   if (c.eligibility === "whitelist") {
-    eligible = !!address && c.whitelist.includes(address.toLowerCase());
+    eligible = !!wlEntry;
     reason = "Your wallet is not whitelisted";
   } else if (c.eligibility === "lp") {
     eligible = positions.some((p) => p.poolId === c.requiredPoolId);
@@ -134,13 +141,15 @@ function CampaignCard({ campaign: c }: { campaign: AirdropCampaign }) {
 
       <div className="mt-5 flex items-end justify-between rounded-2xl bg-[var(--surface)] px-4 py-3">
         <div>
-          <p className="text-xs text-[var(--muted)]">Reward per wallet</p>
+          <p className="text-xs text-[var(--muted)]">
+            {wlEntry ? "Your allocation" : "Reward per wallet"}
+          </p>
           <p className="text-xl font-bold">
-            {c.amountPerClaim.toLocaleString()} {c.tokenSymbol}
+            {claimAmount.toLocaleString()} {c.tokenSymbol}
           </p>
         </div>
         <p className="text-sm text-[var(--muted)]">
-          ≈ {formatUsd(c.amountPerClaim * (token?.priceUsd ?? 0))}
+          ≈ {formatUsd(claimAmount * (token?.priceUsd ?? 0))}
         </p>
       </div>
 

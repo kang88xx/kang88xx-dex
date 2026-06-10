@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAppKit } from "@reown/appkit/react";
 import { useAppKitTheme } from "@reown/appkit/react";
@@ -61,6 +61,39 @@ function WalletSync() {
   return null;
 }
 
+/**
+ * Fire-and-forget analytics: one page view per tab session, plus a count for
+ * each wallet that connects (server dedupes per KST day). Failures are ignored.
+ */
+function AnalyticsTracker() {
+  const { address, status } = useAccount();
+  const reported = useRef<Set<string>>(new Set());
+
+  const post = (body: Record<string, unknown>) =>
+    fetch("/api/analytics", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).catch(() => {});
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (sessionStorage.getItem("ioi_visited")) return;
+    sessionStorage.setItem("ioi_visited", "1");
+    post({ event: "visit" });
+  }, []);
+
+  useEffect(() => {
+    if (status !== "connected" || !address) return;
+    const a = address.toLowerCase();
+    if (reported.current.has(a)) return;
+    reported.current.add(a);
+    post({ event: "connect", address: a });
+  }, [address, status]);
+
+  return null;
+}
+
 /** Keeps the AppKit modal theme in sync with the site light/dark toggle. */
 function AppKitThemeSync() {
   const { setThemeMode } = useAppKitTheme();
@@ -96,6 +129,7 @@ export function Providers({
     >
       <QueryClientProvider client={queryClient}>
         <WalletSync />
+        <AnalyticsTracker />
         <AppKitThemeSync />
         {children}
       </QueryClientProvider>

@@ -188,8 +188,17 @@ interface DexState {
   ) => void;
   updateCampaign: (id: string, patch: Partial<AirdropCampaign>) => void;
   deleteCampaign: (id: string) => void;
-  addToWhitelist: (campaignId: string, address: string) => void;
+  addToWhitelist: (
+    campaignId: string,
+    address: string,
+    amount: number,
+  ) => void;
   removeFromWhitelist: (campaignId: string, address: string) => void;
+  setWhitelistClaimed: (
+    campaignId: string,
+    address: string,
+    claimed: boolean,
+  ) => void;
 
   // admin — swap token registry
   addAdminToken: (token: AdminToken) => void;
@@ -327,7 +336,10 @@ export const useDexStore = create<DexState>()(
               id: uid("camp_"),
               claimedCount: 0,
               createdAt: Date.now(),
-              whitelist: c.whitelist.map((w) => w.toLowerCase()),
+              whitelist: c.whitelist.map((w) => ({
+                ...w,
+                address: w.address.toLowerCase(),
+              })),
             },
             ...s.campaigns,
           ],
@@ -343,13 +355,19 @@ export const useDexStore = create<DexState>()(
       deleteCampaign: (id) =>
         set((s) => ({ campaigns: s.campaigns.filter((c) => c.id !== id) })),
 
-      addToWhitelist: (campaignId, address) =>
+      addToWhitelist: (campaignId, address, amount) =>
         set((s) => ({
           campaigns: s.campaigns.map((c) => {
             if (c.id !== campaignId) return c;
             const addr = address.trim().toLowerCase();
-            if (!addr || c.whitelist.includes(addr)) return c;
-            return { ...c, whitelist: [...c.whitelist, addr] };
+            if (!addr || c.whitelist.some((w) => w.address === addr)) return c;
+            return {
+              ...c,
+              whitelist: [
+                ...c.whitelist,
+                { address: addr, amount, claimed: false },
+              ],
+            };
           }),
         })),
 
@@ -360,7 +378,27 @@ export const useDexStore = create<DexState>()(
               ? {
                   ...c,
                   whitelist: c.whitelist.filter(
-                    (w) => w !== address.toLowerCase(),
+                    (w) => w.address !== address.toLowerCase(),
+                  ),
+                }
+              : c,
+          ),
+        })),
+
+      setWhitelistClaimed: (campaignId, address, claimed) =>
+        set((s) => ({
+          campaigns: s.campaigns.map((c) =>
+            c.id === campaignId
+              ? {
+                  ...c,
+                  whitelist: c.whitelist.map((w) =>
+                    w.address === address.toLowerCase()
+                      ? {
+                          ...w,
+                          claimed,
+                          claimedAt: claimed ? Date.now() : undefined,
+                        }
+                      : w,
                   ),
                 }
               : c,
@@ -422,7 +460,7 @@ export const useDexStore = create<DexState>()(
       // v8: admin-managed swap token registry (adminTokens / disabledTokens)
       // v9: admin-managed liquidity pools (real pools only)
       name: "ioi-dex-store",
-      version: 9,
+      version: 10, // v10: whitelist entries gained per-wallet amount + claimed
       storage: createJSONStorage(() => localStorage),
       partialize: (s) =>
         Object.fromEntries(

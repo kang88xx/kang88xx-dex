@@ -48,16 +48,24 @@ export interface AdminToken {
 
 export type Eligibility = "public" | "whitelist" | "lp";
 
+/** One whitelisted wallet: its allocation and whether it has been received. */
+export interface WhitelistEntry {
+  address: string; // lower-cased EVM address
+  amount: number; // tokens allocated to this specific wallet
+  claimed: boolean; // marked received (admin) / claimed on-chain
+  claimedAt?: number; // epoch ms when marked received
+}
+
 export interface AirdropCampaign {
   id: string;
   name: string;
   description: string;
   tokenSymbol: string;
-  amountPerClaim: number;
+  amountPerClaim: number; // default reward; whitelist wallets use their own amount
   totalAllocation: number;
   claimedCount: number;
   eligibility: Eligibility;
-  whitelist: string[]; // lower-cased addresses (used when eligibility === "whitelist")
+  whitelist: WhitelistEntry[]; // per-wallet allocations (eligibility === "whitelist")
   requiredPoolId?: string; // used when eligibility === "lp"
   active: boolean;
   endsAt: number; // epoch ms
