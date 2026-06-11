@@ -72,6 +72,7 @@ contract MerkleAirdrop {
     event Swept(uint256 indexed id, address indexed to, uint256 amount);
     event CampaignEnded(uint256 indexed id);
     event WhitelistPublished(uint256 indexed id, address[] accounts, uint256[] amounts);
+    event RootUpdated(uint256 indexed id, bytes32 newRoot, uint256 addedFunding);
     event ActiveSet(uint256 indexed id, bool active);
     event OwnerTransferred(address indexed from, address indexed to);
 
@@ -193,6 +194,36 @@ contract MerkleAirdrop {
         c.funded = c.claimed; // prevent re-sweep
         require(IERC20(c.token).transfer(to, left), "transfer failed");
         emit Swept(id, to, left);
+    }
+
+    /**
+     * Replace a whitelist campaign's Merkle root — the "grow the whitelist
+     * after launch" path. Rebuild the root off-chain over the FULL cumulative
+     * allocation list, then top up funding for the newly added allocations in
+     * the same call (addAmount > 0 needs a prior ERC20 approve). Follow with
+     * publishWhitelist(full list) so visitors can rebuild their proofs.
+     * Owner-trust note: this lets the owner change unclaimed allocations;
+     * wallets that already claimed stay claimed (hasClaimed is permanent).
+     */
+    function updateRoot(
+        uint256 id,
+        bytes32 newRoot,
+        uint256 addAmount
+    ) external onlyOwner {
+        Campaign storage c = campaigns[id];
+        require(c.token != address(0), "no campaign");
+        require(c.merkleRoot != bytes32(0), "public campaign");
+        require(newRoot != bytes32(0), "root=0");
+
+        c.merkleRoot = newRoot;
+        if (addAmount > 0) {
+            c.funded += addAmount;
+            require(
+                IERC20(c.token).transferFrom(msg.sender, address(this), addAmount),
+                "fund failed"
+            );
+        }
+        emit RootUpdated(id, newRoot, addAmount);
     }
 
     /**

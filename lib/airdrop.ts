@@ -56,6 +56,19 @@ export const AIRDROP_ABI = [
     outputs: [],
   },
   {
+    // Owner replaces a whitelist campaign's Merkle root (grown allocation
+    // list) and tops up funding for the added allocations in the same tx.
+    type: "function",
+    name: "updateRoot",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "id", type: "uint256" },
+      { name: "newRoot", type: "bytes32" },
+      { name: "addAmount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  {
     // Owner pauses/unpauses on-chain claims for a campaign.
     type: "function",
     name: "setActive",

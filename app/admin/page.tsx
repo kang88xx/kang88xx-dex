@@ -1318,20 +1318,21 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
   const [launching, setLaunching] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [bulk, setBulk] = useState("");
   const [defaultAmount, setDefaultAmount] = useState(
     c.amountPerClaim ? String(c.amountPerClaim) : "",
   );
 
-  // Once launched on-chain the Merkle root is fixed, so allocations are locked.
-  const locked = c.onchainId != null;
+  // Launched on-chain. The root is replaceable via updateRoot, so the
+  // whitelist keeps growing — local additions go live with "온체인 갱신".
+  const launched = c.onchainId != null;
 
   const parsed = parseBulk(bulk, parseFloat(defaultAmount));
   const valid = parsed.filter((r) => r.address && r.amount !== undefined);
   const invalid = parsed.filter((r) => r.error);
 
   const apply = () => {
-    if (locked) return toast.error("온체인 발행됨 — 할당 수정 불가");
     if (valid.length === 0)
       return toast.error("No valid rows to apply");
     addManyToWhitelist(
@@ -1340,9 +1341,108 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
     );
     toast.success(
       `Applied ${valid.length} allocation${valid.length !== 1 ? "s" : ""}` +
-        (invalid.length ? ` · skipped ${invalid.length} invalid` : ""),
+        (invalid.length ? ` · skipped ${invalid.length} invalid` : "") +
+        (launched ? ' — "온체인 갱신"을 눌러야 클레임 가능해집니다' : ""),
     );
     setBulk("");
+  };
+
+  /**
+   * Push the grown whitelist on-chain for an already-launched campaign:
+   * rebuild the full Merkle root, top up funding for the added allocations
+   * (updateRoot pulls the delta in), then republish the full list so any
+   * visitor can rebuild their proof (the latest publish wins on read).
+   */
+  const syncOnChain = async () => {
+    if (!wallet || !publicClient) return toast.error("지갑을 연결하세요");
+    if (chainId !== CHAIN_ID)
+      return toast.error("지갑 네트워크를 BSC로 전환하세요");
+    if (!rewardToken?.address)
+      return toast.error(`${c.tokenSymbol}는 토큰 컨트랙트가 없습니다`);
+    if (c.whitelist.length === 0)
+      return toast.error("화이트리스트가 비어 있습니다");
+    try {
+      setSyncing(true);
+      const decimals = rewardToken.decimals;
+      const allocs = c.whitelist.map((w) => ({
+        address: w.address,
+        amountWei: parseUnits(String(w.amount), decimals).toString(),
+      }));
+      const root = merkleRoot(allocs);
+      const totalWei = allocs.reduce((s, a) => s + BigInt(a.amountWei), 0n);
+      const contract = AIRDROP_CONTRACT as `0x${string}`;
+      const id = BigInt(c.onchainId!);
+
+      // Top-up = new cumulative total − what's already funded on-chain.
+      const onchain = (await publicClient.readContract({
+        address: contract,
+        abi: AIRDROP_ABI,
+        functionName: "campaigns",
+        args: [id],
+      })) as readonly [
+        string,
+        string,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        boolean,
+      ];
+      const fundedWei = onchain[2];
+      const delta = totalWei > fundedWei ? totalWei - fundedWei : 0n;
+      const steps = delta > 0n ? 3 : 2;
+      let step = 0;
+
+      if (delta > 0n) {
+        toast.info(`${++step}/${steps} 추가 충전 승인 중… 지갑에서 확인하세요`);
+        const approveHash = await writeContractAsync({
+          address: rewardToken.address as `0x${string}`,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [contract, delta],
+          chainId: CHAIN_ID,
+        });
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+      }
+
+      toast.info(
+        `${++step}/${steps} 머클 루트 갱신${delta > 0n ? "·충전" : ""} 중… 지갑에서 확인하세요`,
+      );
+      const updateHash = await writeContractAsync({
+        address: contract,
+        abi: AIRDROP_ABI,
+        functionName: "updateRoot",
+        args: [id, root, delta],
+        chainId: CHAIN_ID,
+      });
+      const updReceipt = await publicClient.waitForTransactionReceipt({
+        hash: updateHash,
+      });
+      if (updReceipt.status !== "success")
+        return toast.error("루트 갱신 트랜잭션 실패");
+
+      toast.info(`${++step}/${steps} 화이트리스트 재공개 중… 지갑에서 확인하세요`);
+      const publishHash = await writeContractAsync({
+        address: contract,
+        abi: AIRDROP_ABI,
+        functionName: "publishWhitelist",
+        args: [
+          id,
+          allocs.map((a) => a.address as `0x${string}`),
+          allocs.map((a) => BigInt(a.amountWei)),
+        ],
+        chainId: CHAIN_ID,
+      });
+      await publicClient.waitForTransactionReceipt({ hash: publishHash });
+
+      toast.success(
+        `캠페인 #${c.onchainId} 화이트리스트 갱신 완료 — 추가 인원 클레임 가능`,
+      );
+    } catch {
+      toast.error("온체인 갱신 실패 — 소유자 지갑 / 토큰 잔액을 확인하세요");
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const addMyWallet = () => {
@@ -1463,10 +1563,24 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
       </div>
 
       {/* On-chain launch / status */}
-      {locked ? (
-        <div className="mt-2 flex items-center gap-2 rounded-xl border border-[var(--up)]/30 bg-[var(--up-soft)] px-3 py-2 text-xs font-medium text-[var(--up)]">
-          <Check className="h-4 w-4" />
-          온체인 발행됨 · 캠페인 #{c.onchainId} — 사용자 클레임 가능 (할당 수정 잠김)
+      {launched ? (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--up)]/30 bg-[var(--up-soft)] px-3 py-2">
+          <span className="flex items-center gap-2 text-xs font-medium text-[var(--up)]">
+            <Check className="h-4 w-4" />
+            온체인 발행됨 · 캠페인 #{c.onchainId} — 인원 추가 후 갱신하면 바로 클레임 가능
+          </span>
+          <button
+            onClick={syncOnChain}
+            disabled={syncing}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {syncing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Rocket className="h-3.5 w-3.5" />
+            )}
+            {syncing ? "갱신 중…" : "온체인 갱신"}
+          </button>
         </div>
       ) : (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2">
@@ -1490,8 +1604,8 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
         </div>
       )}
 
-      {/* Bulk entry: paste many, apply at once. Duplicates accumulate. */}
-      {!locked && (
+      {/* Bulk entry: paste many, apply at once. Duplicates accumulate.
+          Stays open after launch — additions go live via "온체인 갱신". */}
       <div className="mt-2">
         <div className="mb-2 flex items-center gap-2">
           <span className="text-xs text-[var(--muted)]">기본 금액</span>
@@ -1547,7 +1661,6 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
           </button>
         </div>
       </div>
-      )}
 
       {/* Entries: per-wallet amount + received toggle */}
       {c.whitelist.length > 0 && (
@@ -1578,7 +1691,7 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
                   {w.claimed && <Check className="h-3 w-3" />}
                   {w.claimed ? "Received" : "Pending"}
                 </button>
-                {!locked && (
+                {!launched && (
                   <button
                     onClick={() => removeFromWhitelist(c.id, w.address)}
                     className="text-[var(--muted)] hover:text-[var(--down)]"

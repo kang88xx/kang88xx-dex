@@ -16,6 +16,11 @@ On-chain airdrop claims that work for every visitor, not just the admin's browse
   and sweeps the unclaimed balance to the connected owner wallet in one tx).
 - `sweep()` only works after a campaign ends; `endAndSweep()` is the explicit
   owner override (added 2026-06-11 — claims stop immediately, so use deliberately).
+- **Whitelists grow after launch** (added 2026-06-11): `updateRoot(id, newRoot,
+  addAmount)` replaces the Merkle root and tops up funding in one tx. In /admin
+  the bulk-entry box stays open after launch — add wallets daily, hit
+  **온체인 갱신** (approve delta if needed → updateRoot → republish full list).
+  Wallets that already claimed stay claimed (hasClaimed is permanent).
 - Security fixes (2026-06-11, commit 0ce2921): analytics swap volume is verified
   on-chain (tx hash required, router + success checked, $1M cap, replay-deduped);
   baseline security headers in `next.config.ts`; login rate limit keys on
@@ -27,18 +32,22 @@ Key files: `contracts/MerkleAirdrop.sol`, `lib/airdrop.ts`,
 `app/admin/page.tsx`.
 
 ## Deployed (BSC testnet, chainId 97)
-- **MerkleAirdrop (v3, current)**: `0xbcb655fa60fe876a307d6ce071b9d83dee7eddbf`
-  — adds `endAndSweep`. Explorer:
-  https://testnet.bscscan.com/address/0xbcb655fa60fe876a307d6ce071b9d83dee7eddbf
+- **MerkleAirdrop (v4, current)**: `0x755f35bf4fa91fda72301d7ce374b710bf87670b`
+  — adds `endAndSweep` + `updateRoot`. Explorer:
+  https://testnet.bscscan.com/address/0x755f35bf4fa91fda72301d7ce374b710bf87670b
 - **Owner** (the only wallet that can launch/sweep): `0x70b4B19F85041bEa823A72D41f841Dc4e028B39D`
-- Superseded deploys (no funds ever held): v2 `0xf8e59afa…7464e`, v1 `0xa5596ac1…474a9`.
+- Superseded deploys: v3 `0xbcb655fa…ddbf` (empty), v2 `0xf8e59afa…7464e` and
+  v1 `0xa5596ac1…474a9` **still hold test campaigns** — v1 #1: 35k KANG
+  (sweepable anytime, v1 has no end-time check), v2 #1: 20M XP (sweepable after
+  2026-06-15), v2 #2: 70k KANG left (locked until 2026-09-18). Recover via
+  BscScan → Write Contract → `sweep(id, to)` with the owner wallet.
 
 ## On the new device
 1. Clone the repo, `npm install`.
 2. Create `.env.local` (gitignored — NOT in the repo):
    ```
    NEXT_PUBLIC_CHAIN_ENV=testnet
-   NEXT_PUBLIC_AIRDROP_TESTNET=0xbcb655fa60fe876a307d6ce071b9d83dee7eddbf
+   NEXT_PUBLIC_AIRDROP_TESTNET=0x755f35bf4fa91fda72301d7ce374b710bf87670b
    NEXT_PUBLIC_REOWN_PROJECT_ID=6bb8771e50f8c0efa5fe14c6545c98c2
    ADMIN_PASSWORD=<choose your own — do not commit it>
    ADMIN_SESSION_SECRET=<any 64-hex; generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))">
