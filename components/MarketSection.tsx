@@ -13,7 +13,10 @@ export function MarketSection() {
   const [selected, setSelected] = useState("BNB");
   const [range, setRange] = useState<ChartRange>("1M");
   const tokens = useMarketTokens();
+  // Selected token may have been disabled by the admin — fall back to the
+  // first enabled one; with everything disabled there is nothing to show.
   const token = tokens.find((t) => t.symbol === selected) ?? tokens[0];
+  if (!token) return null;
 
   return (
     <div>

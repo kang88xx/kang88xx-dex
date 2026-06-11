@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { TOKENS, TOKEN_MAP } from "./tokens";
+import { useTokenRegistry } from "./token-registry";
 import type { MarketData, Token } from "./types";
 import {
   getPriceHistory,
@@ -48,10 +49,16 @@ export function useTokenMarket(symbol: string): MarketData {
   return market[symbol] ?? SEED[symbol] ?? SEED.BNB;
 }
 
-/** Token registry merged with live market data — for tables/lists. */
+/**
+ * Admin-enabled tokens merged with live market data — for tables/lists.
+ * Follows the admin swap-token list: disabled/delisted tokens drop out of
+ * the market chart + table, admin-added customs appear (price $0 until a
+ * feed exists).
+ */
 export function useMarketTokens(): (Token & MarketData)[] {
   const market = useMarket();
-  return TOKENS.map((t) => ({ ...t, ...(market[t.symbol] ?? {}) }));
+  const { enabled } = useTokenRegistry();
+  return enabled.map((t) => ({ ...t, ...(market[t.symbol] ?? {}) }));
 }
 
 const RANGE_DAYS: Record<ChartRange, string> = {
