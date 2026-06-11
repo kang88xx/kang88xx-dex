@@ -336,6 +336,11 @@ function AdminLogin() {
 function AdminDashboard() {
   const campaigns = useDexStore((s) => s.campaigns);
   const queryClient = useQueryClient();
+  // Ended campaigns (swept/expired) collapse into their own section — they
+  // stay as records but stop eating space in the working list.
+  const [showEnded, setShowEnded] = useState(false);
+  const live = campaigns.filter((c) => !isPastMs(c.endsAt));
+  const ended = campaigns.filter((c) => isPastMs(c.endsAt));
 
   const logout = async () => {
     await fetch("/api/admin/logout", { method: "POST" }).catch(() => {});
@@ -356,8 +361,8 @@ function AdminDashboard() {
           <div>
             <h1 className="text-3xl font-medium tracking-tight">Admin Panel</h1>
             <p className="text-sm text-[var(--muted)]">
-              {campaigns.length} campaign{campaigns.length !== 1 && "s"} ·
-              manage rewards & whitelists
+              {live.length} active · {ended.length} ended · manage rewards &
+              whitelists
             </p>
           </div>
         </div>
@@ -379,12 +384,40 @@ function AdminDashboard() {
         <div className="lg:col-span-3">
           <h2 className="mb-3 text-sm font-semibold">Campaigns</h2>
           <div className="space-y-4">
-            {campaigns.map((c) => (
+            {live.map((c) => (
               <CampaignAdminRow key={c.id} campaign={c} />
             ))}
-            {campaigns.length === 0 && (
+            {live.length === 0 && (
               <div className="rounded-3xl border border-dashed border-[var(--border-strong)] py-12 text-center text-sm text-[var(--muted)]">
-                No campaigns yet — create one on the left.
+                {ended.length > 0
+                  ? "No active campaigns — create one on the left."
+                  : "No campaigns yet — create one on the left."}
+              </div>
+            )}
+
+            {/* Ended campaigns — collapsed record list (swept/expired). */}
+            {ended.length > 0 && (
+              <div>
+                <button
+                  onClick={() => setShowEnded((v) => !v)}
+                  aria-expanded={showEnded}
+                  className="flex w-full items-center justify-between rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)]"
+                >
+                  <span className="flex items-center gap-2">
+                    <Check className="h-4 w-4" />
+                    Ended campaigns ({ended.length})
+                  </span>
+                  <span className="text-xs">
+                    {showEnded ? "접기 ▲" : "펼치기 ▼"}
+                  </span>
+                </button>
+                {showEnded && (
+                  <div className="mt-3 space-y-4 opacity-75">
+                    {ended.map((c) => (
+                      <CampaignAdminRow key={c.id} campaign={c} />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
