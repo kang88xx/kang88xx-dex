@@ -70,6 +70,7 @@ contract MerkleAirdrop {
     );
     event Claimed(uint256 indexed id, address indexed account, uint256 amount);
     event Swept(uint256 indexed id, address indexed to, uint256 amount);
+    event CampaignEnded(uint256 indexed id);
     event WhitelistPublished(uint256 indexed id, address[] accounts, uint256[] amounts);
     event ActiveSet(uint256 indexed id, bool active);
     event OwnerTransferred(address indexed from, address indexed to);
@@ -209,6 +210,34 @@ contract MerkleAirdrop {
         require(campaigns[id].token != address(0), "no campaign");
         require(accounts.length == amounts.length, "length mismatch");
         emit WhitelistPublished(id, accounts, amounts);
+    }
+
+    /**
+     * Force-end a campaign NOW and sweep its unclaimed balance to `to` in the
+     * same call. Owner override of the ends-at window that sweep() honors —
+     * claims stop immediately, so use deliberately (claimers lose any time
+     * they were promised). For already-ended campaigns this is just a
+     * convenience one-click sweep.
+     */
+    function endAndSweep(uint256 id, address to) external onlyOwner {
+        require(to != address(0), "to=0");
+        Campaign storage c = campaigns[id];
+        require(c.token != address(0), "no campaign");
+
+        c.active = false;
+        // Pull the end time back so claim()'s `block.timestamp <= endsAt`
+        // check fails from this block onward (and sweep() stays consistent).
+        if (c.endsAt == 0 || c.endsAt >= block.timestamp) {
+            c.endsAt = uint64(block.timestamp - 1);
+        }
+        emit CampaignEnded(id);
+
+        uint256 left = c.funded - c.claimed;
+        if (left > 0) {
+            c.funded = c.claimed; // prevent re-sweep
+            require(IERC20(c.token).transfer(to, left), "transfer failed");
+            emit Swept(id, to, left);
+        }
     }
 
     function setActive(uint256 id, bool active_) external onlyOwner {

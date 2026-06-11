@@ -975,6 +975,92 @@ function CampaignForm() {
 function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
   const updateCampaign = useDexStore((s) => s.updateCampaign);
   const deleteCampaign = useDexStore((s) => s.deleteCampaign);
+  const { address: wallet, chainId } = useAccount();
+  const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
+  const [txBusy, setTxBusy] = useState(false);
+  // Launched on-chain → pause/end must be real transactions, not local state.
+  const launched = c.onchainId != null;
+
+  const requireWallet = (): boolean => {
+    if (!wallet || !publicClient) {
+      toast.error("지갑을 연결하세요");
+      return false;
+    }
+    if (chainId !== CHAIN_ID) {
+      toast.error("지갑 네트워크를 BSC로 전환하세요");
+      return false;
+    }
+    return true;
+  };
+
+  const togglePause = async () => {
+    if (!launched) return updateCampaign(c.id, { active: !c.active });
+    if (!requireWallet()) return;
+    const next = !c.active;
+    try {
+      setTxBusy(true);
+      toast.info(
+        next
+          ? "온체인 캠페인 재개 중… 지갑에서 확인하세요"
+          : "온체인 캠페인 일시정지 중… 지갑에서 확인하세요",
+      );
+      const hash = await writeContractAsync({
+        address: AIRDROP_CONTRACT as `0x${string}`,
+        abi: AIRDROP_ABI,
+        functionName: "setActive",
+        args: [BigInt(c.onchainId!), next],
+        chainId: CHAIN_ID,
+      });
+      const receipt = await publicClient!.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success")
+        return toast.error("온체인 트랜잭션 실패");
+      updateCampaign(c.id, { active: next });
+      toast.success(next ? "캠페인 재개됨 (온체인)" : "캠페인 일시정지됨 (온체인)");
+    } catch {
+      toast.error("실패 — 컨트랙트 소유자 지갑인지 확인하세요");
+    } finally {
+      setTxBusy(false);
+    }
+  };
+
+  const removeCampaign = async () => {
+    // Local-only draft → plain local delete, as before.
+    if (!launched) {
+      deleteCampaign(c.id);
+      toast.info(`Deleted "${c.name}"`);
+      return;
+    }
+    if (!requireWallet()) return;
+    if (
+      !window.confirm(
+        `온체인 캠페인 #${c.onchainId}을(를) 즉시 종료합니다.\n` +
+          `클레임이 바로 중단되고, 미클레임 물량 전부가 연결된 지갑(${wallet!.slice(0, 6)}…${wallet!.slice(-4)})으로 회수됩니다.\n계속할까요?`,
+      )
+    )
+      return;
+    try {
+      setTxBusy(true);
+      toast.info("종료·회수 트랜잭션 전송 중… 지갑에서 확인하세요");
+      const hash = await writeContractAsync({
+        address: AIRDROP_CONTRACT as `0x${string}`,
+        abi: AIRDROP_ABI,
+        functionName: "endAndSweep",
+        args: [BigInt(c.onchainId!), wallet!],
+        chainId: CHAIN_ID,
+      });
+      const receipt = await publicClient!.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success")
+        return toast.error("온체인 트랜잭션 실패");
+      updateCampaign(c.id, { active: false, endsAt: Date.now() });
+      toast.success("캠페인 종료 — 미클레임 물량이 지갑으로 회수되었습니다");
+    } catch {
+      toast.error("종료·회수 실패 — 컨트랙트 소유자 지갑인지 확인하세요");
+    } finally {
+      setTxBusy(false);
+    }
+  };
+
   // Whitelist campaigns track claims per-wallet; others use the flat counter.
   const isWl = c.eligibility === "whitelist";
   const wlClaimed = c.whitelist.filter((w) => w.claimed);
@@ -1020,19 +1106,30 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
             Detail
           </button>
           <button
-            onClick={() => updateCampaign(c.id, { active: !c.active })}
-            title={c.active ? "Pause" : "Activate"}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted)] transition-colors hover:bg-[var(--surface)]"
+            onClick={togglePause}
+            disabled={txBusy}
+            title={
+              launched
+                ? c.active
+                  ? "온체인 일시정지"
+                  : "온체인 재개"
+                : c.active
+                  ? "Pause"
+                  : "Activate"
+            }
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted)] transition-colors hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Power className="h-4 w-4" />
+            {txBusy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Power className="h-4 w-4" />
+            )}
           </button>
           <button
-            onClick={() => {
-              deleteCampaign(c.id);
-              toast.info(`Deleted "${c.name}"`);
-            }}
-            title="Delete"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--down)] transition-colors hover:bg-[var(--down-soft)]"
+            onClick={removeCampaign}
+            disabled={txBusy}
+            title={launched ? "즉시 종료 + 미클레임 회수" : "Delete"}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--down)] transition-colors hover:bg-[var(--down-soft)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Trash2 className="h-4 w-4" />
           </button>

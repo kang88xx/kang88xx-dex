@@ -56,6 +56,28 @@ export const AIRDROP_ABI = [
     outputs: [],
   },
   {
+    // Owner pauses/unpauses on-chain claims for a campaign.
+    type: "function",
+    name: "setActive",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "id", type: "uint256" },
+      { name: "active_", type: "bool" },
+    ],
+    outputs: [],
+  },
+  {
+    // Owner force-ends a campaign and sweeps the unclaimed balance to `to`.
+    type: "function",
+    name: "endAndSweep",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "id", type: "uint256" },
+      { name: "to", type: "address" },
+    ],
+    outputs: [],
+  },
+  {
     type: "function",
     name: "hasClaimed",
     stateMutability: "view",
