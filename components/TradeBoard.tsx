@@ -16,7 +16,7 @@ export function TradeBoard() {
   const pickFromTable = (symbol: string) =>
     setPair(
       symbol === "USDT"
-        ? { from: "USDT", to: "XP" }
+        ? { from: "XP", to: "USDT" }
         : { from: "USDT", to: symbol },
     );
 

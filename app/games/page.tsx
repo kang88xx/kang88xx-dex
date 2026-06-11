@@ -567,7 +567,7 @@ function OnchainGame() {
 
   const [amount, setAmount] = useState("100");
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [busy, setBusy] = useState<"bet" | "settle" | "claim" | null>(null);
+  const [busy, setBusy] = useState<"bet" | "claim" | null>(null);
 
   const contract = LMS_CONTRACT as `0x${string}`;
   const dec = TOKEN_MAP.KANG?.decimals ?? 18;
@@ -637,6 +637,16 @@ function OnchainGame() {
     round != null && !waiting && remainingMs <= 0 && !round.settled;
   const lastBettor =
     round && round.lastBettor !== ZERO_ADDR ? round.lastBettor : null;
+  // A just-ended pot isn't credited until settlement, but claim() settles
+  // automatically on-chain — so show it to the winner as claimable right away.
+  const unsettledWin =
+    expired &&
+    wallet &&
+    lastBettor &&
+    lastBettor.toLowerCase() === wallet.toLowerCase()
+      ? prizePool
+      : 0;
+  const claimable = pending + unsettledWin;
 
   // Recent bets + round history straight from contract events.
   const { data: recentBets } = useQuery({
@@ -705,8 +715,9 @@ function OnchainGame() {
   const parsedAmt = parseFloat(amount);
   const betAmt = Number.isFinite(parsedAmt) ? parsedAmt : 0;
   const overBalance = hydrated && connected && betAmt > kang;
+  // An expired pot goes to its winner — a bet now opens a FRESH round.
   const previewPrize =
-    betAmt > 0 ? prizePool + betAmt * LMS_CONFIG.FEE_PRIZE : 0;
+    betAmt > 0 ? (expired ? 0 : prizePool) + betAmt * LMS_CONFIG.FEE_PRIZE : 0;
 
   const doBet = async () => {
     if (!requireWallet() || !round || !kangAddr) return;
@@ -751,29 +762,6 @@ function OnchainGame() {
     }
   };
 
-  const doSettle = async () => {
-    if (!requireWallet() || !round) return;
-    try {
-      setBusy("settle");
-      toast.info("라운드 정산 트랜잭션을 지갑에서 승인하세요");
-      const hash = await writeContractAsync({
-        address: contract,
-        abi: LMS_ABI,
-        functionName: "settle",
-        args: [BigInt(round.id)],
-        chainId: CHAIN_ID,
-      });
-      const receipt = await publicClient!.waitForTransactionReceipt({ hash });
-      if (receipt.status !== "success") return toast.error("정산 실패");
-      toast.success("라운드 정산 완료 — 새 라운드가 열렸습니다");
-      refreshAll();
-    } catch {
-      toast.error("정산 실패 — 이미 정산되었거나 지갑에서 거부됨");
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const doClaim = async () => {
     if (!requireWallet()) return;
     try {
@@ -787,7 +775,7 @@ function OnchainGame() {
       });
       const receipt = await publicClient!.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") return toast.error("수령 실패");
-      toast.success(`${pending.toLocaleString()} KANG 수령 완료!`);
+      toast.success(`${claimable.toLocaleString()} KANG 수령 완료!`);
       refreshAll();
     } catch {
       toast.error("수령 실패 — 지갑에서 거부되었거나 수령할 금액이 없습니다");
@@ -798,8 +786,9 @@ function OnchainGame() {
 
   const maxBet = () => setAmount(kang > 0 ? String(Math.floor(kang)) : "0");
 
+  // Betting on an expired round is fine — bet() settles it and opens the next.
   const canBet =
-    round != null && !isPaused && !expired && !overBalance && betAmt >= minBet;
+    round != null && !isPaused && !overBalance && betAmt >= minBet;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -842,7 +831,11 @@ function OnchainGame() {
       {/* Hero countdown card */}
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-6 sm:p-10 shadow-2xl mb-5 flex flex-col items-center text-center">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-[var(--muted)] mb-3">
-          {waiting ? "Waiting for first bet" : "Time Remaining"}
+          {waiting
+            ? "Waiting for first bet"
+            : expired
+              ? "Round ended"
+              : "Time Remaining"}
         </span>
 
         <div
@@ -864,18 +857,13 @@ function OnchainGame() {
           </p>
         )}
 
-        {/* Expired round → anyone settles it (credits the winner, opens the next). */}
+        {/* Expired round → bet()/claim() settle it automatically on-chain. */}
         {expired && (
-          <button
-            onClick={doSettle}
-            disabled={busy !== null}
-            className="mb-3 inline-flex items-center gap-2 rounded-2xl bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {busy === "settle" && <Loader2 className="h-4 w-4 animate-spin" />}
-            {busy === "settle"
-              ? "정산 중…"
-              : "라운드 정산 — 승자 확정 & 새 라운드 시작"}
-          </button>
+          <p className="mb-3 text-xs text-[var(--muted)]">
+            {lastBettor
+              ? "승자는 아래에서 바로 클레임할 수 있고, 다음 베팅이 자동으로 새 라운드를 시작합니다"
+              : "다음 베팅이 자동으로 새 라운드를 시작합니다"}
+          </p>
         )}
 
         {/* Last bettor */}
@@ -930,8 +918,8 @@ function OnchainGame() {
       <div className="grid gap-5 md:grid-cols-[1fr_340px]">
         {/* Left column: claims card + bet card + fee bar */}
         <div className="flex flex-col gap-5">
-          {/* Pull-payment prize claim */}
-          {hydrated && connected && pending > 0 && (
+          {/* Pull-payment prize claim — includes a just-won pot (claim() settles it) */}
+          {hydrated && connected && claimable > 0 && (
             <div className="rounded-3xl border border-[var(--up)]/40 bg-[var(--card)] p-5 sm:p-7 shadow-2xl">
               <div className="flex items-center gap-2 mb-4">
                 <Trophy className="h-4 w-4 text-[var(--up)]" />
@@ -939,7 +927,7 @@ function OnchainGame() {
               </div>
               <div className="flex items-center justify-between rounded-2xl bg-[var(--surface)] px-4 py-3">
                 <span className="text-xl font-bold">
-                  {formatNumber(pending, 2)} KANG
+                  {formatNumber(claimable, 2)} KANG
                 </span>
                 <button
                   onClick={doClaim}
@@ -1042,12 +1030,12 @@ function OnchainGame() {
                       ? "라운드 불러오는 중…"
                       : isPaused
                         ? "게임 일시정지됨"
-                        : expired
-                          ? "라운드 종료 — 위에서 정산하세요"
-                          : overBalance
-                            ? "Insufficient KANG"
-                            : betAmt < minBet
-                              ? `Minimum ${minBet.toLocaleString()} KANG`
+                        : overBalance
+                          ? "Insufficient KANG"
+                          : betAmt < minBet
+                            ? `Minimum ${minBet.toLocaleString()} KANG`
+                            : expired
+                              ? `Bet ${betAmt.toLocaleString()} KANG — 새 라운드 시작`
                               : `Bet ${betAmt.toLocaleString()} KANG`}
                 </button>
               )}

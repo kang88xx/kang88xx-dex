@@ -122,17 +122,50 @@ contract KangLMS {
     // ---------- Game ----------
 
     /**
+     * Settle the current round if its deadline has passed: credit the pot
+     * (winner, or refund a sole bettor) and roll to the next round. Runs
+     * automatically inside bet() and claim(), so the game flows from round
+     * to round without anyone sending an explicit settle tx. Makes no
+     * external calls — safe inside the nonReentrant entry points.
+     */
+    function _settleExpired() internal returns (bool) {
+        Round storage r = rounds[currentRoundId];
+        if (r.deadline == 0 || block.timestamp <= r.deadline || r.settled) {
+            return false;
+        }
+
+        r.settled = true;
+        address recipient = r.lastBettor;
+        uint256 amount = r.prizePool;
+        r.prizePool = 0;
+        bool hasWinner = r.uniquePlayers >= 2 && recipient != address(0);
+
+        if (recipient != address(0) && amount > 0) {
+            pendingPrize[recipient] += amount;
+            totalPendingPrize += amount;
+            emit PrizeCredited(currentRoundId, recipient, amount, !hasWinner);
+        }
+        emit RoundSettled(
+            currentRoundId,
+            hasWinner ? recipient : address(0),
+            hasWinner ? amount : 0
+        );
+
+        currentRoundId++;
+        return true;
+    }
+
+    /**
      * Place a bet in the current round. Caller must have approved this
      * contract for at least `amount`. The first bet of a round starts its
-     * clock; later bets extend it (capped at maxRemaining).
+     * clock; later bets extend it (capped at maxRemaining). If the previous
+     * round expired, it is settled HERE — this bet opens the next round.
      */
     function bet(uint256 amount) external nonReentrant {
         require(!paused, "paused");
+        _settleExpired();
         Round storage r = rounds[currentRoundId];
         require(!r.settled, "settled");
-        if (r.deadline != 0) {
-            require(block.timestamp <= r.deadline, "expired - settle first");
-        }
         require(amount >= minBet, "below minBet");
 
         require(
@@ -170,40 +203,23 @@ contract KangLMS {
     }
 
     /**
-     * Settle the current round after its deadline passed — anyone may call.
-     * ≥2 unique players → last bettor wins the pool; otherwise the sole
-     * bettor is refunded. Either way the pot is CREDITED (pull-payment) and
-     * the next round opens (its clock starts at its first bet).
+     * Manually settle the current round after its deadline — anyone may
+     * call. Usually unnecessary: bet() and claim() settle automatically.
      */
     function settle(uint256 roundId) external nonReentrant {
         require(roundId == currentRoundId, "not current round");
-        Round storage r = rounds[roundId];
-        require(r.deadline != 0, "round not started");
-        require(block.timestamp > r.deadline, "round not expired");
-        require(!r.settled, "already settled");
-
-        r.settled = true;
-        address recipient = r.lastBettor;
-        uint256 amount = r.prizePool;
-        r.prizePool = 0;
-        bool hasWinner = r.uniquePlayers >= 2 && recipient != address(0);
-
-        if (recipient != address(0) && amount > 0) {
-            pendingPrize[recipient] += amount;
-            totalPendingPrize += amount;
-            emit PrizeCredited(roundId, recipient, amount, !hasWinner);
-        }
-        emit RoundSettled(roundId, hasWinner ? recipient : address(0), hasWinner ? amount : 0);
-
-        currentRoundId++;
+        require(_settleExpired(), "not expired");
     }
 
     /**
-     * Withdraw everything credited to the caller. Deliberately NOT gated by
-     * `paused` — a winner can always claim. Balance-capped: any shortfall
-     * stays claimable later instead of reverting.
+     * Withdraw everything credited to the caller. If the current round just
+     * expired, it is settled first — so the winner claims their fresh pot in
+     * ONE tx (and the next round opens). Deliberately NOT gated by `paused`
+     * — a winner can always claim. Balance-capped: any shortfall stays
+     * claimable later instead of reverting.
      */
     function claim() external nonReentrant {
+        _settleExpired();
         uint256 owed = pendingPrize[msg.sender];
         require(owed > 0, "nothing to claim");
 
