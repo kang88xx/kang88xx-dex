@@ -1224,6 +1224,11 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
   );
 }
 
+/** Wall-clock check kept outside the component for the react-compiler purity lint. */
+function isPastMs(ms: number): boolean {
+  return ms !== 0 && ms <= Date.now();
+}
+
 const ZERO_ROOT =
   "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
 
@@ -1456,6 +1461,20 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
         boolean,
       ];
       const fundedWei = onchain[2];
+      const endsAtSec = Number(onchain[5]);
+      const isActive = onchain[6];
+      // Guard: topping up an inactive/ended campaign locks tokens that
+      // claim() will always reject — block and route the admin instead.
+      if (!isActive) {
+        return toast.error(
+          "일시정지된 캠페인입니다 — 재개(Power) 후 갱신하세요",
+        );
+      }
+      if (isPastMs(endsAtSec * 1000)) {
+        return toast.error(
+          "종료된 캠페인입니다 — 미클레임 회수 후 새 캠페인으로 발행하세요",
+        );
+      }
       const delta = totalWei > fundedWei ? totalWei - fundedWei : 0n;
       const steps = delta > 0n ? 3 : 2;
       let step = 0;
@@ -1500,7 +1519,13 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
         ],
         chainId: CHAIN_ID,
       });
-      await publicClient.waitForTransactionReceipt({ hash: publishHash });
+      const pubReceipt = await publicClient.waitForTransactionReceipt({
+        hash: publishHash,
+      });
+      if (pubReceipt.status !== "success")
+        return toast.error(
+          "화이트리스트 재공개 실패 — '온체인 갱신'을 다시 눌러 재시도하세요",
+        );
 
       toast.success(
         `캠페인 #${c.onchainId} 화이트리스트 갱신 완료 — 추가 인원 클레임 가능`,
@@ -1603,9 +1628,19 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
         ],
         chainId: CHAIN_ID,
       });
-      await publicClient.waitForTransactionReceipt({ hash: publishHash });
+      const pubReceipt = await publicClient.waitForTransactionReceipt({
+        hash: publishHash,
+      });
 
+      // The campaign IS launched+funded at this point regardless of the
+      // publish outcome — record it, and if the publish reverted point the
+      // admin at 온체인 갱신, which republishes the full list (the retry path).
       updateCampaign(c.id, { onchainId: id });
+      if (pubReceipt.status !== "success") {
+        return toast.error(
+          `캠페인 #${id} 발행·충전은 완료됐지만 화이트리스트 공개가 실패했습니다 — '온체인 갱신'으로 재공개하세요`,
+        );
+      }
       toast.success(
         `온체인 캠페인 #${id} 발행·충전·공개 완료 — 누구나 클레임 가능`,
       );

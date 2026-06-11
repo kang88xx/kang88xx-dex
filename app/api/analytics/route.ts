@@ -14,14 +14,23 @@ export const dynamic = "force-dynamic";
 
 // Single-swap sanity ceiling — a report above this is noise or abuse.
 const MAX_SWAP_USD = 1_000_000;
+// A swap must be reported promptly — blocks replaying historical router txs
+// (anyone's, scraped from the explorer) as fresh volume.
+const MAX_SWAP_AGE_S = 15 * 60;
 
-/** The tx must exist, have succeeded, and have been sent to our router. */
+/** Tx must exist, have succeeded, target our router, and be recent. */
 async function isRouterSwap(txHash: `0x${string}`): Promise<boolean> {
   try {
-    const receipt = await serverRpc().getTransactionReceipt({ hash: txHash });
+    const rpc = serverRpc();
+    const receipt = await rpc.getTransactionReceipt({ hash: txHash });
+    if (
+      receipt.status !== "success" ||
+      (receipt.to ?? "").toLowerCase() !== PANCAKE_ROUTER.toLowerCase()
+    )
+      return false;
+    const block = await rpc.getBlock({ blockNumber: receipt.blockNumber });
     return (
-      receipt.status === "success" &&
-      (receipt.to ?? "").toLowerCase() === PANCAKE_ROUTER.toLowerCase()
+      Math.floor(Date.now() / 1000) - Number(block.timestamp) <= MAX_SWAP_AGE_S
     );
   } catch {
     return false; // not found / RPC failure → fail closed

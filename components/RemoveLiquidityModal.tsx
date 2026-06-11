@@ -93,7 +93,11 @@ export function RemoveLiquidityModal({
           args: [PANCAKE_ROUTER, lpToBurn],
           chainId: CHAIN_ID,
         });
-        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        const approveReceipt = await publicClient.waitForTransactionReceipt({
+          hash: approveHash,
+        });
+        if (approveReceipt.status !== "success")
+          throw new Error("LP approve reverted");
       }
 
       // 2) Withdraw with 1% slippage tolerance on both sides.

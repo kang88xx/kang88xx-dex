@@ -183,7 +183,9 @@ export function AddLiquidityModal({
       args: [PANCAKE_ROUTER, amount],
       chainId: CHAIN_ID,
     });
-    await publicClient!.waitForTransactionReceipt({ hash });
+    const receipt = await publicClient!.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success")
+      throw new Error(`${label} approve reverted`);
   };
 
   const supply = async () => {

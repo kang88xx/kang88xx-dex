@@ -4,9 +4,9 @@ import { useMemo } from "react";
 import { formatUnits } from "viem";
 import { useReadContracts } from "wagmi";
 import { useQuery } from "@tanstack/react-query";
-import { TOKEN_MAP } from "./tokens";
-import { WBNB, PANCAKE_FACTORY, CHAIN_ID } from "./chain";
+import { PANCAKE_FACTORY, CHAIN_ID } from "./chain";
 import { useMarket } from "./market";
+import { useAllTokenMap, liquidityTokenAddress } from "./liquidity";
 import type { Pool } from "./types";
 
 // Minimal ABIs for live pool reads.
@@ -51,14 +51,6 @@ export function pairKey(a: string, b: string): string {
   return [a, b].sort().join("-");
 }
 
-/** Registry symbol → on-chain address (BNB → WBNB). null if not on-chain. */
-function tokenAddress(symbol: string): `0x${string}` | null {
-  const t = TOKEN_MAP[symbol];
-  if (!t) return null;
-  if (symbol === "BNB") return WBNB;
-  return (t.address as `0x${string}` | null) ?? null;
-}
-
 export interface PoolStats {
   tvlUsd: number;
   volume24h: number;
@@ -87,6 +79,8 @@ const UNAVAILABLE: PoolStats = {
  */
 export function usePoolStats(pools: Pool[]): Record<string, PoolStats> {
   const market = useMarket();
+  // Static registry + admin-added tokens, so custom-token pools resolve too.
+  const tokenMap = useAllTokenMap();
 
   // Per-pool 24h volume (USD) by pair key, from server analytics.
   const { data: volByPair } = useQuery<Record<string, number>>({
@@ -105,8 +99,8 @@ export function usePoolStats(pools: Pool[]): Record<string, PoolStats> {
     () =>
       pools
         .map((pool) => {
-          const a = tokenAddress(pool.token0);
-          const b = tokenAddress(pool.token1);
+          const a = liquidityTokenAddress(pool.token0, tokenMap);
+          const b = liquidityTokenAddress(pool.token1, tokenMap);
           if (!a || !b || a.toLowerCase() === b.toLowerCase()) return null;
           return { pool, a, b };
         })
@@ -114,7 +108,7 @@ export function usePoolStats(pools: Pool[]): Record<string, PoolStats> {
           (e): e is { pool: Pool; a: `0x${string}`; b: `0x${string}` } =>
             e !== null,
         ),
-    [pools],
+    [pools, tokenMap],
   );
 
   // Round 1 — resolve pair addresses via factory.getPair.
@@ -187,8 +181,8 @@ export function usePoolStats(pools: Pool[]): Record<string, PoolStats> {
       const [r0, r1] = resRes.result as readonly [bigint, bigint, number];
       const token0Addr = (t0Res.result as string).toLowerCase();
       const a = entries[entryIdx].a.toLowerCase();
-      const tokenA = TOKEN_MAP[pool.token0];
-      const tokenB = TOKEN_MAP[pool.token1];
+      const tokenA = tokenMap[pool.token0];
+      const tokenB = tokenMap[pool.token1];
       if (!tokenA || !tokenB) return;
 
       // Map reserves back to token0/token1 of THIS pool.
@@ -221,6 +215,7 @@ export function usePoolStats(pools: Pool[]): Record<string, PoolStats> {
   }, [
     pools,
     entries,
+    tokenMap,
     callMap,
     pairData,
     reserveData,
