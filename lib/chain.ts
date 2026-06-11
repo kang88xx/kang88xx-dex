@@ -51,3 +51,12 @@ export const AIRDROP_CONTRACT = ((IS_TESTNET
   : process.env.NEXT_PUBLIC_AIRDROP_MAINNET) ?? "") as
   | `0x${string}`
   | "";
+
+// KangLMS (Last Man Standing game) contract — deploy with
+// `npm run deploy:lms`, then set the resulting address here per network.
+// Empty = not deployed yet (the /games page runs in local demo mode).
+export const LMS_CONTRACT = ((IS_TESTNET
+  ? process.env.NEXT_PUBLIC_LMS_TESTNET
+  : process.env.NEXT_PUBLIC_LMS_MAINNET) ?? "") as
+  | `0x${string}`
+  | "";

@@ -10,7 +10,9 @@
     "deploy:token": "node scripts/deploy-token.mjs",
     "compile:airdrop": "node scripts/compile-contract.mjs MerkleAirdrop",
     "deploy:airdrop": "node scripts/deploy-airdrop.mjs",
-    "test:merkle": "node scripts/test-merkle.mjs"
+    "test:merkle": "node scripts/test-merkle.mjs",
+    "compile:lms": "node scripts/compile-contract.mjs KangLMS",
+    "deploy:lms": "node scripts/deploy-lms.mjs"
   },
   "dependencies": {
     "@openzeppelin/merkle-tree": "^1.0.8",

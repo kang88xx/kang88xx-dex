@@ -1,15 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Coins, Trophy, Clock, Flame, Users, TrendingUp } from "lucide-react";
+import { Coins, Trophy, Clock, Flame, Users, TrendingUp, Loader2 } from "lucide-react";
 import { useAppKit } from "@reown/appkit/react";
+import { erc20Abi, formatUnits, parseUnits } from "viem";
+import {
+  useAccount,
+  usePublicClient,
+  useReadContract,
+  useWriteContract,
+} from "wagmi";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDexStore, useHydrated, LMS_CONFIG } from "@/lib/store";
 import { useBalance } from "@/lib/balances";
 import { formatNumber, shortAddress, timeAgoPure } from "@/lib/format";
 import { Eyebrow } from "@/components/ui";
 import { TokenLogo } from "@/components/TokenLogo";
+import { toast } from "@/components/toast";
 import { TOKEN_MAP } from "@/lib/tokens";
-import { CHAIN_LABEL, IS_TESTNET } from "@/lib/chain";
+import { CHAIN_ID, CHAIN_LABEL, IS_TESTNET } from "@/lib/chain";
+import { LMS_ABI, LMS_CONTRACT, lmsLive } from "@/lib/lms";
 
 // KANG meme-coin contract on the active network — the token used for game bets.
 const KANG_ADDRESS = TOKEN_MAP.KANG?.address ?? "not deployed on this network";
@@ -34,6 +44,12 @@ function mmss(ms: number): string {
 }
 
 export default function GamesPage() {
+  // lmsLive is a build-time env constant — same on server and client.
+  return lmsLive ? <OnchainGame /> : <DemoGame />;
+}
+
+/** The local demo (phantom bots, store rounds) — shown until KangLMS is deployed. */
+function DemoGame() {
   const hydrated = useHydrated();
   const connected = useDexStore((s) => s.connected);
   const address = useDexStore((s) => s.address);
@@ -519,6 +535,642 @@ export default function GamesPage() {
                     </span>
                     <span className="text-[var(--muted)] text-right">
                       {timeAgoPure(h.endedAt, nowMs)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── On-chain game (KangLMS) ──────────────────────────────────────────────────
+
+const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
+
+/**
+ * The real game — round state, bets, prizes all live on the KangLMS contract.
+ * Anyone can settle an expired round (pull-payment prizes, no keeper needed).
+ */
+function OnchainGame() {
+  const hydrated = useHydrated();
+  const connected = useDexStore((s) => s.connected);
+  const { open: openWalletModal } = useAppKit();
+  const { address: wallet, chainId } = useAccount();
+  const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
+  const queryClient = useQueryClient();
+  const kang = useBalance("KANG");
+
+  const [amount, setAmount] = useState("100");
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [busy, setBusy] = useState<"bet" | "settle" | "claim" | null>(null);
+
+  const contract = LMS_CONTRACT as `0x${string}`;
+  const dec = TOKEN_MAP.KANG?.decimals ?? 18;
+  const kangAddr = TOKEN_MAP.KANG?.address as `0x${string}` | undefined;
+
+  // Live round (id, prizePool, totalBurned, deadline, lastBettor, betCount,
+  // uniquePlayers, settled) — one read, 5s refresh.
+  const { data: roundData } = useReadContract({
+    address: contract,
+    abi: LMS_ABI,
+    functionName: "currentRound",
+    chainId: CHAIN_ID,
+    query: { refetchInterval: 5_000 },
+  });
+  const { data: pendingWei } = useReadContract({
+    address: contract,
+    abi: LMS_ABI,
+    functionName: "pendingPrize",
+    args: wallet ? [wallet] : undefined,
+    chainId: CHAIN_ID,
+    query: { enabled: !!wallet, refetchInterval: 10_000 },
+  });
+  const { data: minBetWei } = useReadContract({
+    address: contract,
+    abi: LMS_ABI,
+    functionName: "minBet",
+    chainId: CHAIN_ID,
+    query: { refetchInterval: 60_000 },
+  });
+  const { data: isPaused } = useReadContract({
+    address: contract,
+    abi: LMS_ABI,
+    functionName: "paused",
+    chainId: CHAIN_ID,
+    query: { refetchInterval: 30_000 },
+  });
+
+  // 1-second ticker drives the countdown.
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const round = roundData
+    ? {
+        id: Number(roundData[0]),
+        prizePoolWei: roundData[1],
+        burnedWei: roundData[2],
+        deadlineMs: Number(roundData[3]) * 1000,
+        lastBettor: roundData[4] as string,
+        betCount: Number(roundData[5]),
+        uniquePlayers: Number(roundData[6]),
+        settled: roundData[7],
+      }
+    : null;
+
+  const prizePool = round ? Number(formatUnits(round.prizePoolWei, dec)) : 0;
+  const burned = round ? Number(formatUnits(round.burnedWei, dec)) : 0;
+  const minBet = minBetWei != null ? Number(formatUnits(minBetWei, dec)) : 1;
+  const pending = pendingWei != null ? Number(formatUnits(pendingWei, dec)) : 0;
+
+  // deadline == 0 → the round is waiting for its first bet (lazy start).
+  const waiting = round != null && round.deadlineMs === 0;
+  const remainingMs =
+    round && !waiting ? Math.max(0, round.deadlineMs - nowMs) : 0;
+  const expired =
+    round != null && !waiting && remainingMs <= 0 && !round.settled;
+  const lastBettor =
+    round && round.lastBettor !== ZERO_ADDR ? round.lastBettor : null;
+
+  // Recent bets + round history straight from contract events.
+  const { data: recentBets } = useQuery({
+    queryKey: ["lms-recent-bets", contract, round?.id],
+    enabled: !!publicClient && round != null,
+    refetchInterval: 10_000,
+    queryFn: async () => {
+      const logs = await publicClient!.getContractEvents({
+        address: contract,
+        abi: LMS_ABI,
+        eventName: "BetPlaced",
+        args: { roundId: BigInt(round!.id) },
+        fromBlock: "earliest",
+        toBlock: "latest",
+      });
+      return logs
+        .slice(-12)
+        .reverse()
+        .map((log) => ({
+          key: `${log.transactionHash}-${log.logIndex}`,
+          bettor: (log.args.bettor ?? ZERO_ADDR) as string,
+          amount: Number(formatUnits(log.args.amount ?? 0n, dec)),
+          block: Number(log.blockNumber ?? 0n),
+        }));
+    },
+  });
+
+  const { data: history } = useQuery({
+    queryKey: ["lms-history", contract, round?.id],
+    enabled: !!publicClient && round != null,
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      const logs = await publicClient!.getContractEvents({
+        address: contract,
+        abi: LMS_ABI,
+        eventName: "RoundSettled",
+        fromBlock: "earliest",
+        toBlock: "latest",
+      });
+      return logs
+        .slice(-5)
+        .reverse()
+        .map((log) => ({
+          roundId: Number(log.args.id ?? 0n),
+          winner: (log.args.winner ?? ZERO_ADDR) as string,
+          prize: Number(formatUnits(log.args.prize ?? 0n, dec)),
+          block: Number(log.blockNumber ?? 0n),
+        }));
+    },
+  });
+
+  const refreshAll = () => queryClient.invalidateQueries();
+
+  const requireWallet = (): boolean => {
+    if (!wallet || !publicClient) {
+      toast.error("지갑을 연결하세요");
+      return false;
+    }
+    if (chainId !== CHAIN_ID) {
+      toast.error("지갑 네트워크를 BSC로 전환하세요");
+      return false;
+    }
+    return true;
+  };
+
+  const parsedAmt = parseFloat(amount);
+  const betAmt = Number.isFinite(parsedAmt) ? parsedAmt : 0;
+  const overBalance = hydrated && connected && betAmt > kang;
+  const previewPrize =
+    betAmt > 0 ? prizePool + betAmt * LMS_CONFIG.FEE_PRIZE : 0;
+
+  const doBet = async () => {
+    if (!requireWallet() || !round || !kangAddr) return;
+    const amountWei = parseUnits(String(betAmt), dec);
+    try {
+      setBusy("bet");
+      const allowance = await publicClient!.readContract({
+        address: kangAddr,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [wallet!, contract],
+      });
+      if (allowance < amountWei) {
+        toast.info("1/2 KANG 사용 승인 중… 지갑에서 확인하세요");
+        const approveHash = await writeContractAsync({
+          address: kangAddr,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [contract, amountWei],
+          chainId: CHAIN_ID,
+        });
+        await publicClient!.waitForTransactionReceipt({ hash: approveHash });
+      }
+      toast.info("베팅 트랜잭션을 지갑에서 승인하세요");
+      const hash = await writeContractAsync({
+        address: contract,
+        abi: LMS_ABI,
+        functionName: "bet",
+        args: [amountWei],
+        chainId: CHAIN_ID,
+      });
+      const receipt = await publicClient!.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") return toast.error("베팅 실패");
+      toast.success(
+        `${betAmt.toLocaleString()} KANG 베팅 완료 — 타이머가 연장되었습니다`,
+      );
+      refreshAll();
+    } catch {
+      toast.error("베팅 실패 — 라운드 만료 / 잔액 / 지갑 거부를 확인하세요");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doSettle = async () => {
+    if (!requireWallet() || !round) return;
+    try {
+      setBusy("settle");
+      toast.info("라운드 정산 트랜잭션을 지갑에서 승인하세요");
+      const hash = await writeContractAsync({
+        address: contract,
+        abi: LMS_ABI,
+        functionName: "settle",
+        args: [BigInt(round.id)],
+        chainId: CHAIN_ID,
+      });
+      const receipt = await publicClient!.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") return toast.error("정산 실패");
+      toast.success("라운드 정산 완료 — 새 라운드가 열렸습니다");
+      refreshAll();
+    } catch {
+      toast.error("정산 실패 — 이미 정산되었거나 지갑에서 거부됨");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doClaim = async () => {
+    if (!requireWallet()) return;
+    try {
+      setBusy("claim");
+      toast.info("상금 수령 트랜잭션을 지갑에서 승인하세요");
+      const hash = await writeContractAsync({
+        address: contract,
+        abi: LMS_ABI,
+        functionName: "claim",
+        chainId: CHAIN_ID,
+      });
+      const receipt = await publicClient!.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") return toast.error("수령 실패");
+      toast.success(`${pending.toLocaleString()} KANG 수령 완료!`);
+      refreshAll();
+    } catch {
+      toast.error("수령 실패 — 지갑에서 거부되었거나 수령할 금액이 없습니다");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const maxBet = () => setAmount(kang > 0 ? String(Math.floor(kang)) : "0");
+
+  const canBet =
+    round != null && !isPaused && !expired && !overBalance && betAmt >= minBet;
+
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+      <Eyebrow dot="yellow" className="mb-5">
+        Play · Last Man Standing
+      </Eyebrow>
+
+      {/* Title row */}
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--accent-soft)]">
+            <Coins className="h-6 w-6 text-[var(--accent)]" />
+          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold tracking-tight">
+                Last Man Standing
+              </h1>
+              <span className="inline-flex items-center gap-1 rounded-full border border-[var(--up)]/40 bg-[var(--up-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--up)]">
+                On-chain · {round ? `Round #${round.id + 1}` : "…"}
+              </span>
+            </div>
+            <p className="text-sm text-[var(--muted)]">
+              Place a bet. Reset the timer. Last bettor wins the pool.
+            </p>
+          </div>
+        </div>
+
+        <div
+          title={`${CHAIN_LABEL} KANG · ${KANG_ADDRESS}`}
+          className="hidden items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs sm:flex"
+        >
+          <TokenLogo symbol="KANG" size={18} />
+          <span className="font-semibold">KANG</span>
+          <span className="text-[var(--muted)]">·</span>
+          <span className="font-mono text-[var(--muted)]">BSC</span>
+        </div>
+      </div>
+
+      {/* Hero countdown card */}
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-6 sm:p-10 shadow-2xl mb-5 flex flex-col items-center text-center">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-[var(--muted)] mb-3">
+          {waiting ? "Waiting for first bet" : "Time Remaining"}
+        </span>
+
+        <div
+          className="font-mono text-7xl sm:text-8xl font-bold tabular-nums leading-none mb-4"
+          style={{
+            color: waiting
+              ? "var(--muted-2)"
+              : remainingMs < 10_000
+                ? "var(--down)"
+                : "var(--foreground)",
+          }}
+        >
+          {waiting ? "--:--" : mmss(remainingMs)}
+        </div>
+
+        {waiting && (
+          <p className="mb-3 text-xs text-[var(--muted)]">
+            첫 베팅이 들어오면 타이머가 시작됩니다
+          </p>
+        )}
+
+        {/* Expired round → anyone settles it (credits the winner, opens the next). */}
+        {expired && (
+          <button
+            onClick={doSettle}
+            disabled={busy !== null}
+            className="mb-3 inline-flex items-center gap-2 rounded-2xl bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy === "settle" && <Loader2 className="h-4 w-4 animate-spin" />}
+            {busy === "settle"
+              ? "정산 중…"
+              : "라운드 정산 — 승자 확정 & 새 라운드 시작"}
+          </button>
+        )}
+
+        {/* Last bettor */}
+        <div className="text-sm text-[var(--muted)]">
+          {lastBettor ? (
+            <>
+              {expired ? "Winner:" : "Last bettor:"}{" "}
+              <span className="font-mono font-semibold text-[var(--foreground)]">
+                {shortAddress(lastBettor)}
+                {wallet && lastBettor.toLowerCase() === wallet.toLowerCase() && (
+                  <span className="ml-1.5 inline-flex items-center rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)]">
+                    YOU
+                  </span>
+                )}
+              </span>
+            </>
+          ) : (
+            <span>No bets yet</span>
+          )}
+        </div>
+      </div>
+
+      {/* Stats row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <StatCard
+          icon={<TrendingUp className="h-4 w-4" />}
+          label="Prize Pool"
+          value={`${formatNumber(prizePool, 2)} KANG`}
+          detail="80% of bets"
+          accent
+        />
+        <StatCard
+          icon={<Users className="h-4 w-4" />}
+          label="Players"
+          value={round ? String(round.uniquePlayers) : "—"}
+          detail="this round"
+        />
+        <StatCard
+          icon={<Clock className="h-4 w-4" />}
+          label="Total Bets"
+          value={round ? String(round.betCount) : "—"}
+          detail="this round"
+        />
+        <StatCard
+          icon={<Flame className="h-4 w-4" />}
+          label="Burned"
+          value={`${formatNumber(burned, 2)} KANG`}
+          detail="5% of bets"
+        />
+      </div>
+
+      <div className="grid gap-5 md:grid-cols-[1fr_340px]">
+        {/* Left column: claims card + bet card + fee bar */}
+        <div className="flex flex-col gap-5">
+          {/* Pull-payment prize claim */}
+          {hydrated && connected && pending > 0 && (
+            <div className="rounded-3xl border border-[var(--up)]/40 bg-[var(--card)] p-5 sm:p-7 shadow-2xl">
+              <div className="flex items-center gap-2 mb-4">
+                <Trophy className="h-4 w-4 text-[var(--up)]" />
+                <h2 className="text-base font-semibold">Your Prize</h2>
+              </div>
+              <div className="flex items-center justify-between rounded-2xl bg-[var(--surface)] px-4 py-3">
+                <span className="text-xl font-bold">
+                  {formatNumber(pending, 2)} KANG
+                </span>
+                <button
+                  onClick={doClaim}
+                  disabled={busy !== null}
+                  className="inline-flex items-center gap-2 rounded-xl bg-[var(--up)] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {busy === "claim" && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  {busy === "claim" ? "수령 중…" : "Claim"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Place Your Bet card */}
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 sm:p-7 shadow-2xl">
+            <h2 className="text-base font-semibold mb-4">Place Your Bet</h2>
+
+            <div className="rounded-2xl bg-[var(--surface)] p-4">
+              <div className="flex items-center justify-between text-xs text-[var(--muted)]">
+                <label htmlFor="lms-bet-amount">Bet amount</label>
+                <span>
+                  Balance:{" "}
+                  <span
+                    className={
+                      overBalance ? "font-semibold text-[var(--down)]" : ""
+                    }
+                  >
+                    {hydrated && connected ? formatNumber(kang, 2) : "—"} KANG
+                  </span>
+                </span>
+              </div>
+              <div className="mt-1 flex items-center">
+                <input
+                  id="lms-bet-amount"
+                  type="number"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  min={minBet}
+                  placeholder="0"
+                  className="w-full bg-transparent text-2xl font-semibold outline-none placeholder:text-[var(--muted-2)]"
+                />
+                <span className="text-sm font-semibold text-[var(--muted)]">
+                  KANG
+                </span>
+              </div>
+              <div className="mt-2 flex gap-2 flex-wrap">
+                {QUICK_CHIPS.map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setAmount(String(v))}
+                    className="rounded-lg bg-[var(--card)] px-2.5 py-1 text-xs font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)]"
+                  >
+                    {v}
+                  </button>
+                ))}
+                <button
+                  disabled={!hydrated || !connected}
+                  onClick={maxBet}
+                  className="rounded-lg bg-[var(--card)] px-2.5 py-1 text-xs font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-50"
+                >
+                  MAX
+                </button>
+              </div>
+            </div>
+
+            {/* Payout preview */}
+            <div className="mt-3 flex items-center justify-between rounded-2xl border border-[var(--border)] px-4 py-3 text-sm">
+              <span className="text-[var(--muted)]">
+                Payout if you hold the last bet
+              </span>
+              <span className="font-semibold">
+                {betAmt > 0 ? `${formatNumber(previewPrize, 2)} KANG` : "—"}
+              </span>
+            </div>
+
+            {/* Action button */}
+            <div className="mt-5">
+              {!hydrated ? (
+                <div className="h-12 w-full rounded-2xl bg-[var(--surface-2)] animate-pulse-soft" />
+              ) : !connected ? (
+                <button
+                  onClick={() => openWalletModal()}
+                  className="h-12 w-full rounded-2xl bg-[var(--accent)] font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
+                >
+                  Connect Wallet
+                </button>
+              ) : (
+                <button
+                  onClick={doBet}
+                  disabled={!canBet || busy !== null}
+                  className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--muted-2)]"
+                >
+                  {busy === "bet" && <Loader2 className="h-5 w-5 animate-spin" />}
+                  {busy === "bet"
+                    ? "베팅 중…"
+                    : !round
+                      ? "라운드 불러오는 중…"
+                      : isPaused
+                        ? "게임 일시정지됨"
+                        : expired
+                          ? "라운드 종료 — 위에서 정산하세요"
+                          : overBalance
+                            ? "Insufficient KANG"
+                            : betAmt < minBet
+                              ? `Minimum ${minBet.toLocaleString()} KANG`
+                              : `Bet ${betAmt.toLocaleString()} KANG`}
+                </button>
+              )}
+            </div>
+
+            <p className="mt-3 text-center text-[11px] text-[var(--muted-2)]">
+              No randomness · last bettor wins the pool · prizes are claimed
+              from the contract (pull-payment)
+            </p>
+          </div>
+
+          {/* Fee distribution bar */}
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5">
+            <h3 className="text-sm font-semibold mb-3">Fee Distribution</h3>
+            <div className="flex h-3 w-full overflow-hidden rounded-full">
+              <div
+                className="h-full"
+                style={{ width: "80%", backgroundColor: "var(--accent)" }}
+                title="80% Prize Pool"
+              />
+              <div
+                className="h-full"
+                style={{ width: "15%", backgroundColor: "var(--up)" }}
+                title="15% Treasury"
+              />
+              <div
+                className="h-full"
+                style={{ width: "5%", backgroundColor: "var(--down)" }}
+                title="5% Burn"
+              />
+            </div>
+            <div className="mt-3 flex flex-col gap-2 text-xs text-[var(--muted)]">
+              <LegendRow color="var(--accent)" label="Prize" pct="80%" />
+              <LegendRow
+                color="var(--up)"
+                label="Treasury"
+                pct="15%"
+                address={FEE_WALLETS.treasury}
+              />
+              <LegendRow
+                color="var(--down)"
+                label="Burn"
+                pct="5%"
+                address={FEE_WALLETS.burn}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Right column: recent bets + round history */}
+        <div className="flex flex-col gap-5">
+          {/* Recent Bets */}
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold">Recent Bets</h3>
+              <span className="text-xs text-[var(--muted-2)]">
+                {recentBets?.length ?? 0} shown
+              </span>
+            </div>
+            {!recentBets || recentBets.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-[var(--border)] px-3 py-6 text-center text-xs text-[var(--muted-2)]">
+                No bets yet — be the first.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-2 pb-1 text-[10px] uppercase tracking-widest text-[var(--muted-2)]">
+                  <span>Address</span>
+                  <span>Amount</span>
+                  <span>Block</span>
+                </div>
+                {recentBets.map((bet) => (
+                  <div
+                    key={bet.key}
+                    className="grid grid-cols-[1fr_auto_auto] gap-2 items-center rounded-xl px-2 py-1.5 text-xs"
+                  >
+                    <span className="font-mono">
+                      {shortAddress(bet.bettor)}
+                      {wallet &&
+                        bet.bettor.toLowerCase() === wallet.toLowerCase() && (
+                          <span className="ml-1 inline-flex items-center rounded-full bg-[var(--accent-soft)] px-1.5 py-px text-[9px] font-bold text-[var(--accent)]">
+                            YOU
+                          </span>
+                        )}
+                    </span>
+                    <span className="font-semibold text-right">
+                      {formatNumber(bet.amount, 2)}
+                    </span>
+                    <span className="text-[var(--muted-2)] text-right font-mono text-[10px]">
+                      {bet.block}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Round History */}
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5">
+            <h3 className="text-sm font-semibold mb-3">Round History</h3>
+            {!history || history.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-[var(--border)] px-3 py-6 text-center text-xs text-[var(--muted-2)]">
+                First round in progress.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="grid grid-cols-[auto_1fr_auto] gap-2 px-2 pb-1 text-[10px] uppercase tracking-widest text-[var(--muted-2)]">
+                  <span>Round</span>
+                  <span>Winner</span>
+                  <span>Prize</span>
+                </div>
+                {history.map((h) => (
+                  <div
+                    key={h.roundId}
+                    className="grid grid-cols-[auto_1fr_auto] gap-2 items-center rounded-xl px-2 py-1.5 text-xs"
+                  >
+                    <span className="font-mono text-[var(--muted-2)] text-[10px]">
+                      #{h.roundId + 1}
+                    </span>
+                    <span className="font-mono truncate">
+                      {h.winner !== ZERO_ADDR ? shortAddress(h.winner) : "환불"}
+                    </span>
+                    <span className="font-semibold text-right">
+                      {formatNumber(h.prize, 2)}
                     </span>
                   </div>
                 ))}
