@@ -1210,6 +1210,15 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
     onchainRow !== undefined
       ? (onchainRow as readonly [string, string, bigint, bigint, bigint, bigint, boolean])[6]
       : undefined;
+  // A zero token in the row means this id doesn't exist on the CURRENT
+  // contract — the record was launched on a previous deployment (env
+  // cutover). On-chain actions can't touch it; delete goes local-only.
+  const missingOnchain =
+    launched &&
+    onchainRow !== undefined &&
+    /^0x0+$/.test(
+      (onchainRow as readonly [string, ...unknown[]])[0] as string,
+    );
   const isActive = launched ? (onchainActive ?? c.active) : c.active;
 
   // Per-wallet claim state straight from the chain (launched whitelist
@@ -1230,6 +1239,10 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
 
   const togglePause = async () => {
     if (!launched) return updateCampaign(c.id, { active: !c.active });
+    if (missingOnchain)
+      return toast.error(
+        "이전 컨트랙트에서 발행된 캠페인입니다 — 현재 컨트랙트에서는 제어할 수 없습니다",
+      );
     if (!requireWallet()) return;
     if (!(await ensureContractOwner(publicClient!, wallet!))) return;
     const next = !isActive;
@@ -1264,10 +1277,14 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
   };
 
   const removeCampaign = async () => {
-    // Local-only draft → plain local delete, as before.
-    if (!launched) {
+    // Local-only draft, or a record launched on a PREVIOUS contract (its id
+    // doesn't exist on the current one) → plain local delete.
+    if (!launched || missingOnchain) {
       deleteCampaign(c.id);
-      toast.info(`Deleted "${c.name}"`);
+      toast.info(
+        `Deleted "${c.name}"` +
+          (missingOnchain ? " — 이전 컨트랙트 발행분, 로컬 기록만 삭제됨" : ""),
+      );
       return;
     }
     if (!requireWallet()) return;
@@ -1415,19 +1432,29 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
       </div>
 
       {c.eligibility === "whitelist" && (
-        <WhitelistManager campaign={c} claimStatus={wlStatus} />
+        <WhitelistManager
+          campaign={c}
+          claimStatus={wlStatus}
+          missingOnchain={missingOnchain}
+        />
       )}
       {c.eligibility === "public" && <PublicLaunchPanel campaign={c} />}
 
       <DeleteConfirmModal
         open={confirmDelete}
-        title={launched ? `캠페인 #${c.onchainId} 즉시 종료` : `"${c.name}" 삭제`}
-        description={
-          launched
-            ? `온체인 캠페인 #${c.onchainId}을(를) 즉시 종료합니다. 클레임이 바로 중단되고, 미클레임 물량 전부가 연결된 오너 지갑으로 회수됩니다. 되돌릴 수 없습니다.`
-            : `"${c.name}" 캠페인 드래프트를 삭제합니다 (화이트리스트 명단 포함).`
+        title={
+          launched && !missingOnchain
+            ? `캠페인 #${c.onchainId} 즉시 종료`
+            : `"${c.name}" 삭제`
         }
-        confirmLabel={launched ? "종료 + 회수" : "삭제"}
+        description={
+          launched && !missingOnchain
+            ? `온체인 캠페인 #${c.onchainId}을(를) 즉시 종료합니다. 클레임이 바로 중단되고, 미클레임 물량 전부가 연결된 오너 지갑으로 회수됩니다. 되돌릴 수 없습니다.`
+            : missingOnchain
+              ? `"${c.name}"은(는) 이전 컨트랙트에서 발행된 캠페인입니다 — 현재 컨트랙트에는 존재하지 않아 로컬 기록만 삭제합니다. 이전 컨트랙트에 남은 미클레임 물량은 별도로 회수해야 합니다.`
+              : `"${c.name}" 캠페인 드래프트를 삭제합니다 (화이트리스트 명단 포함).`
+        }
+        confirmLabel={launched && !missingOnchain ? "종료 + 회수" : "삭제"}
         onConfirm={() => {
           setConfirmDelete(false);
           void removeCampaign();
@@ -1734,9 +1761,12 @@ function parseBulk(text: string, defaultAmount: number): ParsedRow[] {
 function WhitelistManager({
   campaign: c,
   claimStatus,
+  missingOnchain = false,
 }: {
   campaign: AirdropCampaign;
   claimStatus: WlClaimStatus;
+  /** Launched on a previous contract — its id isn't on the current one. */
+  missingOnchain?: boolean;
 }) {
   const address = useDexStore((s) => s.address);
   const addManyToWhitelist = useDexStore((s) => s.addManyToWhitelist);
@@ -1799,6 +1829,10 @@ function WhitelistManager({
       return toast.error("지갑 네트워크를 BSC로 전환하세요");
     if (!rewardToken?.address)
       return toast.error(`${c.tokenSymbol}는 토큰 컨트랙트가 없습니다`);
+    if (missingOnchain)
+      return toast.error(
+        "이전 컨트랙트에서 발행된 캠페인입니다 — 삭제 후 새 캠페인으로 발행하세요",
+      );
     if (c.whitelist.length === 0)
       return toast.error("화이트리스트가 비어 있습니다");
     if (!(await ensureContractOwner(publicClient, wallet))) return;
@@ -2048,7 +2082,12 @@ function WhitelistManager({
       </div>
 
       {/* On-chain launch / status */}
-      {launched ? (
+      {launched && missingOnchain ? (
+        <div className="mt-2 rounded-xl border border-[var(--down)]/30 bg-[var(--down-soft)] px-3 py-2 text-xs font-medium text-[var(--down)]">
+          이전 컨트랙트에서 발행된 캠페인 (#{c.onchainId}) — 현재 컨트랙트에 없어
+          제어할 수 없습니다. 삭제(로컬 기록 제거) 후 새 캠페인으로 발행하세요.
+        </div>
+      ) : launched ? (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--up)]/30 bg-[var(--up-soft)] px-3 py-2">
           <span className="flex items-center gap-2 text-xs font-medium text-[var(--up)]">
             <Check className="h-4 w-4" />
