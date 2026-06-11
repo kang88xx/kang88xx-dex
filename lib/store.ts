@@ -560,7 +560,9 @@ export const useDexStore = create<DexState>()(
       // v10: whitelist entries gained per-wallet amount + claimed
       // v11: airdrop contract redeployed (v4) — old onchainIds point at the
       //      abandoned v2 contract, so launched campaigns revert to drafts
-      version: 11,
+      // v12: demo seed campaigns (genesis / early-supporter) removed — they
+      //      respawned in every fresh browser after the admin deleted them
+      version: 12,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) =>
         Object.fromEntries(
@@ -581,18 +583,32 @@ export const useDexStore = create<DexState>()(
         // v10 → v11: keep campaign names/whitelists but strip launch state
         // (onchainId, claim marks) so they can launch fresh on the new
         // contract. Stale per-wallet claim records go too.
-        if (Array.isArray(p.campaigns)) {
-          p.campaigns = (p.campaigns as AirdropCampaign[]).map((c) => ({
-            ...c,
-            onchainId: undefined,
-            claimedCount: 0,
-            whitelist: (c.whitelist ?? []).map((w) => ({
-              ...w,
-              claimed: false,
-            })),
-          }));
+        if (version < 11) {
+          if (Array.isArray(p.campaigns)) {
+            p.campaigns = (p.campaigns as AirdropCampaign[]).map((c) => ({
+              ...c,
+              onchainId: undefined,
+              claimedCount: 0,
+              whitelist: (c.whitelist ?? []).map((w) => ({
+                ...w,
+                claimed: false,
+              })),
+            }));
+          }
+          p.claims = {};
         }
-        p.claims = {};
+        // v11 → v12: drop the demo seed campaigns. They were baked into every
+        // fresh browser's localStorage, so deleting them in /admin couldn't
+        // make them disappear for visitors. Launched ones are kept on-chain.
+        if (Array.isArray(p.campaigns)) {
+          p.campaigns = (p.campaigns as AirdropCampaign[]).filter(
+            (c) =>
+              !(
+                (c.id === "genesis" || c.id === "early-supporter") &&
+                c.onchainId == null
+              ),
+          );
+        }
         return p as unknown as DexState;
       },
     },

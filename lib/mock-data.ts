@@ -112,42 +112,11 @@ function rangeLabel(range: ChartRange, i: number, points: number): string {
 //  Seed airdrop campaigns (admin-managed at runtime)
 // ------------------------------------------------------------------
 
-const DAY = 1000 * 60 * 60 * 24;
-
+// No demo seeds: campaigns live in per-browser localStorage, so anything
+// seeded here resurrects in every fresh browser even after the admin
+// deletes it. Real campaigns are created in /admin and read on-chain.
 export function seedCampaigns(): AirdropCampaign[] {
-  const now = Date.now();
-  return [
-    {
-      id: "genesis",
-      name: "Genesis Airdrop",
-      description:
-        "IOI's public launch airdrop. Any connected wallet can claim once.",
-      tokenSymbol: "IOI",
-      amountPerClaim: 250,
-      totalAllocation: 1_000_000,
-      claimedCount: 3187,
-      eligibility: "public",
-      whitelist: [],
-      active: true,
-      endsAt: now + 30 * DAY,
-      createdAt: now - 5 * DAY,
-    },
-    {
-      id: "early-supporter",
-      name: "Early Supporter Reward",
-      description:
-        "A larger reward reserved for whitelisted early supporters. Add your wallet to the whitelist from the Admin panel to test claiming.",
-      tokenSymbol: "IOI",
-      amountPerClaim: 1000,
-      totalAllocation: 500_000,
-      claimedCount: 142,
-      eligibility: "whitelist",
-      whitelist: [],
-      active: true,
-      endsAt: now + 14 * DAY,
-      createdAt: now - 2 * DAY,
-    },
-  ];
+  return [];
 }
 
 // Admin auth moved server-side — see lib/admin-auth.ts + /api/admin/* routes.
