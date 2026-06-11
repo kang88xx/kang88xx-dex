@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
-import { SwapCard } from "@/components/SwapCard";
-import { MarketSection } from "@/components/MarketSection";
+import { TradeBoard } from "@/components/TradeBoard";
 import { PerspectiveGrid } from "@/components/PerspectiveGrid";
 import { POOLS } from "@/lib/mock-data";
 import { CHAIN_LABEL } from "@/lib/chain";
@@ -54,14 +53,9 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Swap + Market */}
+      {/* Swap + Market — shared pair state (chart follows the buy side) */}
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-          <div className="lg:sticky lg:top-20 lg:self-start">
-            <SwapCard />
-          </div>
-          <MarketSection />
-        </div>
+        <TradeBoard />
       </div>
     </>
   );

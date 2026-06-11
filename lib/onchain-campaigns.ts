@@ -36,6 +36,13 @@ export interface OnchainCampaign {
   endsAtMs: number;
   active: boolean;
   name: string;
+  /**
+   * Tokens funded at CREATION (from the CampaignCreated event) — the
+   * allocation entered at launch. Stays fixed when the admin later grows the
+   * whitelist via updateRoot, so progress bars keep a stable denominator.
+   * null when the event log couldn't be read.
+   */
+  launchFunded: number | null;
 }
 
 function shortAddr(a: string): string {
@@ -91,12 +98,15 @@ export function useOnchainCampaigns(): {
     query: { enabled: airdropLive && count > 0, refetchInterval: 30_000 },
   });
 
-  // Names from CampaignCreated logs — best-effort, never blocks claiming.
-  const { data: names } = useQuery({
-    queryKey: ["airdrop-campaign-names", contract, count],
+  // Name + initial funding from CampaignCreated logs — best-effort, never
+  // blocks claiming.
+  const { data: meta } = useQuery({
+    queryKey: ["airdrop-campaign-meta", contract, count],
     enabled: airdropLive && count > 0 && !!publicClient,
     staleTime: 5 * 60_000,
-    queryFn: async (): Promise<Record<number, string>> => {
+    queryFn: async (): Promise<
+      Record<number, { name?: string; fundedWei?: string }>
+    > => {
       if (!publicClient) return {};
       try {
         const logs = await publicClient.getContractEvents({
@@ -106,10 +116,14 @@ export function useOnchainCampaigns(): {
           fromBlock: "earliest",
           toBlock: "latest",
         });
-        const out: Record<number, string> = {};
+        const out: Record<number, { name?: string; fundedWei?: string }> = {};
         for (const log of logs) {
-          const args = log.args as { id?: bigint; name?: string };
-          if (args.id != null && args.name) out[Number(args.id)] = args.name;
+          const args = log.args as { id?: bigint; name?: string; funded?: bigint };
+          if (args.id == null) continue;
+          out[Number(args.id)] = {
+            name: args.name || undefined,
+            fundedWei: args.funded?.toString(),
+          };
         }
         return out;
       } catch {
@@ -153,11 +167,14 @@ export function useOnchainCampaigns(): {
         amountPerClaim: Number(formatUnits(amountPerClaim, decimals)),
         endsAtMs: Number(endsAt) * 1000,
         active,
-        name: names?.[id] ?? `Airdrop #${id}`,
+        name: meta?.[id]?.name ?? `Airdrop #${id}`,
+        launchFunded: meta?.[id]?.fundedWei
+          ? Number(formatUnits(BigInt(meta[id].fundedWei!), decimals))
+          : null,
       });
     });
     return list;
-  }, [rows, ids, all, names]);
+  }, [rows, ids, all, meta]);
 
   return { campaigns, isLoading: countLoading || rowsLoading };
 }

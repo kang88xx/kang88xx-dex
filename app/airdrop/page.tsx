@@ -142,8 +142,11 @@ function OnchainCampaignCard({
   const soldOut = c.isPublic
     ? remainingWei < c.amountPerClaimWei
     : remainingWei <= 0n;
+  // Progress denominator = the allocation entered at LAUNCH (stable even when
+  // the admin grows the whitelist later); live funded is only the fallback.
+  const totalForBar = c.launchFunded ?? c.funded;
   const progress =
-    c.funded > 0 ? Math.min(100, (c.claimed / c.funded) * 100) : 0;
+    totalForBar > 0 ? Math.min(100, (c.claimed / totalForBar) * 100) : 0;
 
   // Whitelist proofs need the (address, amount) list. We read it straight from
   // the chain (published as an event at launch), so any visitor can claim. The
@@ -306,7 +309,7 @@ function OnchainCampaignCard({
         <div className="flex justify-between text-xs text-[var(--muted)]">
           <span>{progress.toFixed(1)}% claimed</span>
           <span>
-            {formatCompact(c.claimed)} / {formatCompact(c.funded)}{" "}
+            {formatCompact(c.claimed)} / {formatCompact(totalForBar)}{" "}
             {c.tokenSymbol}
           </span>
         </div>

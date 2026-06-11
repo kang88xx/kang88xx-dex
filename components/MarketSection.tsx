@@ -9,8 +9,21 @@ import { PriceChart, Sparkline } from "@/components/PriceChart";
 import { AddToWalletButton } from "@/components/AddToWalletButton";
 import { Eyebrow } from "@/components/ui";
 
-export function MarketSection() {
-  const [selected, setSelected] = useState("BNB");
+export function MarketSection({
+  chartSymbol,
+  onTokenSelect,
+}: {
+  /** Controlled chart token (e.g. the swap's receive side). */
+  chartSymbol?: string;
+  /** Called when a token row is clicked — overrides the local selection. */
+  onTokenSelect?: (symbol: string) => void;
+} = {}) {
+  const [localSelected, setLocalSelected] = useState("BNB");
+  const selected = chartSymbol ?? localSelected;
+  const select = (symbol: string) => {
+    if (onTokenSelect) onTokenSelect(symbol);
+    else setLocalSelected(symbol);
+  };
   const [range, setRange] = useState<ChartRange>("1M");
   const tokens = useMarketTokens();
   // Selected token may have been disabled by the admin — fall back to the
@@ -106,11 +119,11 @@ export function MarketSection() {
             {tokens.map((t, i) => (
               <tr
                 key={t.symbol}
-                onClick={() => setSelected(t.symbol)}
+                onClick={() => select(t.symbol)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    setSelected(t.symbol);
+                    select(t.symbol);
                   }
                 }}
                 tabIndex={0}

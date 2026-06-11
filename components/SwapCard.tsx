@@ -35,7 +35,19 @@ const BSC_CHAIN_ID = CHAIN_ID;
 // Keep a little BNB aside for gas when pressing MAX
 const BNB_GAS_RESERVE = 0.005;
 
-export function SwapCard() {
+export interface SwapPair {
+  from: string;
+  to: string;
+}
+
+export function SwapCard({
+  pair,
+  onPairChange,
+}: {
+  /** Controlled token pair — pass with onPairChange to drive it externally. */
+  pair?: SwapPair;
+  onPairChange?: (pair: SwapPair) => void;
+} = {}) {
   const hydrated = useHydrated();
   const connected = useDexStore((s) => s.connected);
   const recordTransaction = useDexStore((s) => s.recordTransaction);
@@ -48,8 +60,15 @@ export function SwapCard() {
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
 
-  const [from, setFrom] = useState("BNB");
-  const [to, setTo] = useState("USDT");
+  const [localPair, setLocalPair] = useState<SwapPair>({
+    from: "BNB",
+    to: "USDT",
+  });
+  const { from, to } = pair ?? localPair;
+  const setPair = (next: SwapPair) => {
+    onPairChange?.(next);
+    if (!pair) setLocalPair(next);
+  };
   const [amount, setAmount] = useState("");
   const [picker, setPicker] = useState<null | "from" | "to">(null);
   const [slippage, setSlippage] = useState(0.5);
@@ -121,18 +140,15 @@ export function SwapCard() {
   };
 
   const switchTokens = () => {
-    setFrom(to);
-    setTo(from);
+    setPair({ from: to, to: from });
     setAmount("");
   };
 
   const pick = (symbol: string) => {
     if (picker === "from") {
-      if (symbol === to) setTo(from);
-      setFrom(symbol);
+      setPair({ from: symbol, to: symbol === to ? from : to });
     } else if (picker === "to") {
-      if (symbol === from) setFrom(to);
-      setTo(symbol);
+      setPair({ from: symbol === from ? to : from, to: symbol });
     }
   };
 
@@ -282,7 +298,7 @@ export function SwapCard() {
       {/* From */}
       <div className="rounded-2xl bg-[var(--surface)] p-4">
         <div className="flex items-center justify-between text-xs text-[var(--muted)]">
-          <span>You pay</span>
+          <span>Sell</span>
           {hydrated && connected && (
             <button
               onClick={setMax}
@@ -321,7 +337,7 @@ export function SwapCard() {
 
       {/* To */}
       <div className="rounded-2xl bg-[var(--surface)] p-4">
-        <span className="text-xs text-[var(--muted)]">You receive</span>
+        <span className="text-xs text-[var(--muted)]">Buy</span>
         <div className="mt-2 flex items-center justify-between gap-3">
           <span className="w-full truncate text-3xl font-semibold text-[var(--foreground)]">
             {quote.isLoading && amountOut === 0 && amountNum > 0
