@@ -1967,7 +1967,12 @@ function WhitelistManager({
         amountWei: parseUnits(String(w.amount), decimals).toString(),
       }));
       const root = merkleRoot(allocs);
-      const totalWei = allocs.reduce((s, a) => s + BigInt(a.amountWei), 0n);
+      // Keep funding topped up to the full allocation budget (not just the
+      // whitelist sum) — lets an admin raise an under-funded campaign (e.g.
+      // one launched before this change) to its allocation via "온체인 갱신".
+      const wlSumWei = allocs.reduce((s, a) => s + BigInt(a.amountWei), 0n);
+      const allocWei = parseUnits(String(c.totalAllocation), decimals);
+      const totalWei = allocWei > wlSumWei ? allocWei : wlSumWei;
       const contract = AIRDROP_CONTRACT as `0x${string}`;
       const id = BigInt(c.onchainId!);
 
@@ -2098,10 +2103,16 @@ function WhitelistManager({
         amountWei: parseUnits(String(w.amount), decimals).toString(),
       }));
       const root = merkleRoot(allocs);
-      const totalWei = c.whitelist.reduce(
+      // Fund the FULL allocation budget (e.g. 1,000,000), not just the current
+      // whitelist sum — so the progress bar reads claimed / total-allocation
+      // for every visitor and fills as the admin grows the list and wallets
+      // claim. Unclaimed remainder is recovered with endAndSweep at the end.
+      const wlSumWei = c.whitelist.reduce(
         (s, w) => s + parseUnits(String(w.amount), decimals),
         0n,
       );
+      const allocWei = parseUnits(String(c.totalAllocation), decimals);
+      const totalWei = allocWei > wlSumWei ? allocWei : wlSumWei;
       const endsAtSec = BigInt(Math.floor(c.endsAt / 1000));
       const tokenAddr = rewardToken.address as `0x${string}`;
       const contract = AIRDROP_CONTRACT as `0x${string}`;
@@ -2220,7 +2231,7 @@ function WhitelistManager({
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2">
           <span className="text-xs text-[var(--muted)]">
             {airdropLive
-              ? "준비되면 온체인에 발행 — 토큰을 컨트랙트에 충전하고 클레임을 엽니다."
+              ? `준비되면 온체인에 발행 — 총 할당량 ${c.totalAllocation.toLocaleString()} ${c.tokenSymbol} 전액을 컨트랙트에 충전하고 클레임을 엽니다 (미클레임분은 종료 시 회수).`
               : "온체인 발행하려면 먼저 에어드랍 컨트랙트를 배포하세요 (npm run deploy:airdrop)."}
           </span>
           <button
