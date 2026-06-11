@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Plus, Minus, Droplets } from "lucide-react";
-import { useDexStore, useHydrated, usePositions } from "@/lib/store";
-import { formatCompact, formatUsd } from "@/lib/format";
+import { formatUnits } from "viem";
+import { useDexStore, useHydrated } from "@/lib/store";
+import { useMarket } from "@/lib/market";
+import { formatCompact, formatNumber, formatUsd } from "@/lib/format";
 import { usePoolStats, type PoolStats } from "@/lib/pool-stats";
+import { useAllTokenMap, usePoolsOnchain } from "@/lib/liquidity";
 import { TokenPair } from "@/components/TokenLogo";
 import { AddLiquidityModal } from "@/components/AddLiquidityModal";
+import { RemoveLiquidityModal } from "@/components/RemoveLiquidityModal";
 import { Eyebrow } from "@/components/ui";
 
 /** Format a live APR percent, or "—"/"…" when unavailable/loading. */
@@ -28,15 +32,39 @@ function usdText(
 
 export default function PoolsPage() {
   const hydrated = useHydrated();
-  const positions = usePositions();
   const pools = useDexStore((s) => s.pools);
   const stats = usePoolStats(pools);
+  const onchain = usePoolsOnchain(pools);
+  const tokenMap = useAllTokenMap();
+  const market = useMarket();
   const [addPool, setAddPool] = useState<string | null>(null);
+  const [removePool, setRemovePool] = useState<string | null>(null);
 
-  const poolMap = new Map(pools.map((p) => [p.id, p]));
-  // Ignore any persisted positions whose pool no longer exists.
-  const knownPositions = positions.filter((p) => poolMap.has(p.poolId));
-  const positionMap = new Map(knownPositions.map((p) => [p.poolId, p]));
+  // Real positions: pools where the connected wallet holds LP tokens.
+  const positions = useMemo(
+    () =>
+      pools.flatMap((pool) => {
+        const oc = onchain[pool.id];
+        if (!oc || oc.lpBalance <= 0n || oc.totalSupply <= 0n) return [];
+        const tA = tokenMap[pool.token0];
+        const tB = tokenMap[pool.token1];
+        if (!tA || !tB) return [];
+        const amtA = Number(
+          formatUnits((oc.reserveA * oc.lpBalance) / oc.totalSupply, tA.decimals),
+        );
+        const amtB = Number(
+          formatUnits((oc.reserveB * oc.lpBalance) / oc.totalSupply, tB.decimals),
+        );
+        const sharePct =
+          Number((oc.lpBalance * 1_000_000n) / oc.totalSupply) / 10_000;
+        const amountUsd =
+          amtA * (market[pool.token0]?.priceUsd ?? 0) +
+          amtB * (market[pool.token1]?.priceUsd ?? 0);
+        return [{ pool, amtA, amtB, sharePct, amountUsd }];
+      }),
+    [pools, onchain, tokenMap, market],
+  );
+  const positionIds = new Set(positions.map((p) => p.pool.id));
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
@@ -54,53 +82,51 @@ export default function PoolsPage() {
         </div>
       </div>
 
-      {/* Your positions */}
-      {hydrated && knownPositions.length > 0 && (
+      {/* Your positions — read live from the wallet's LP token balances */}
+      {hydrated && positions.length > 0 && (
         <div className="mt-6 rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5">
           <h2 className="flex items-center gap-2 text-sm font-semibold">
             <Droplets className="h-4 w-4 text-[var(--accent)]" />
             Your positions
           </h2>
           <div className="mt-4 space-y-2">
-            {knownPositions.map((p) => {
-              const pool = poolMap.get(p.poolId)!;
-              return (
-                <div
-                  key={p.poolId}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[var(--surface)] px-4 py-3"
-                >
-                  <div className="flex items-center gap-3">
-                    <TokenPair token0={pool.token0} token1={pool.token1} />
-                    <div>
-                      <div className="text-sm font-semibold">
-                        {pool.token0} / {pool.token1}
-                      </div>
-                      <div className="text-xs text-[var(--muted)]">
-                        {p.sharePct.toFixed(3)}% of pool
-                      </div>
+            {positions.map(({ pool, amtA, amtB, sharePct, amountUsd }) => (
+              <div
+                key={pool.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[var(--surface)] px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <TokenPair token0={pool.token0} token1={pool.token1} />
+                  <div>
+                    <div className="text-sm font-semibold">
+                      {pool.token0} / {pool.token1}
                     </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <div className="text-sm font-semibold">
-                        {formatUsd(p.amountUsd)}
-                      </div>
-                      <div className="text-xs text-[var(--up)]">
-                        {aprText(stats[p.poolId])} APR
-                      </div>
+                    <div className="text-xs text-[var(--muted)]">
+                      {formatNumber(amtA, 4)} {pool.token0} +{" "}
+                      {formatNumber(amtB, 4)} {pool.token1} ·{" "}
+                      {sharePct.toFixed(3)}% of pool
                     </div>
-                    <button
-                      disabled
-                      title="On-chain pools coming soon"
-                      className="inline-flex cursor-not-allowed items-center gap-1 rounded-full border border-[var(--border-strong)] px-3 py-1.5 text-xs font-medium text-[var(--muted-2)]"
-                    >
-                      <Minus className="h-3.5 w-3.5" />
-                      Remove
-                    </button>
                   </div>
                 </div>
-              );
-            })}
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <div className="text-sm font-semibold">
+                      {formatUsd(amountUsd)}
+                    </div>
+                    <div className="text-xs text-[var(--up)]">
+                      {aprText(stats[pool.id])} APR
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setRemovePool(pool.id)}
+                    className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] px-3 py-1.5 text-xs font-medium text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--foreground)]"
+                  >
+                    <Minus className="h-3.5 w-3.5" />
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -131,7 +157,7 @@ export default function PoolsPage() {
               </tr>
             )}
             {pools.map((p) => {
-              const hasPos = positionMap.has(p.id);
+              const hasPos = positionIds.has(p.id);
               return (
                 <tr
                   key={p.id}
@@ -181,6 +207,10 @@ export default function PoolsPage() {
       </div>
 
       <AddLiquidityModal poolId={addPool} onClose={() => setAddPool(null)} />
+      <RemoveLiquidityModal
+        poolId={removePool}
+        onClose={() => setRemovePool(null)}
+      />
     </div>
   );
 }

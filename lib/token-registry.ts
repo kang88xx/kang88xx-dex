@@ -47,11 +47,15 @@ export interface TokenRegistry {
 export function useTokenRegistry(): TokenRegistry {
   const adminTokens = useDexStore((s) => s.adminTokens);
   const disabledTokens = useDexStore((s) => s.disabledTokens);
+  const removedTokens = useDexStore((s) => s.removedTokens);
 
   return useMemo(() => {
-    const all: Token[] = [...BASE_TOKENS];
+    // Removed (delisted) tokens drop out of the registry entirely — they
+    // disappear from every list until the admin restores them.
+    const removedSet = new Set(removedTokens ?? []);
+    const all: Token[] = BASE_TOKENS.filter((t) => !removedSet.has(t.symbol));
     for (const a of adminTokens) {
-      if (!all.some((t) => t.symbol === a.symbol)) {
+      if (!removedSet.has(a.symbol) && !all.some((t) => t.symbol === a.symbol)) {
         all.push(adminTokenToToken(a));
       }
     }
@@ -62,5 +66,5 @@ export function useTokenRegistry(): TokenRegistry {
       enabled.map((t) => [t.symbol, t]),
     );
     return { all, enabled, tradable, map, disabledSet };
-  }, [adminTokens, disabledTokens]);
+  }, [adminTokens, disabledTokens, removedTokens]);
 }

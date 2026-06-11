@@ -158,6 +158,7 @@ interface DexState {
   // admin-managed swap token registry (merged with the static registry)
   adminTokens: AdminToken[];
   disabledTokens: string[]; // symbols hidden from swapping
+  removedTokens: string[]; // static-registry symbols delisted entirely (restorable)
 
   // admin-managed liquidity pools (only pools that actually exist)
   pools: Pool[];
@@ -209,6 +210,9 @@ interface DexState {
   addAdminToken: (token: AdminToken) => void;
   removeAdminToken: (symbol: string) => void;
   setTokenEnabled: (symbol: string, enabled: boolean) => void;
+  /** Delist a static-registry token entirely (reversible via restoreToken). */
+  removeToken: (symbol: string) => void;
+  restoreToken: (symbol: string) => void;
 
   // admin — liquidity pools
   addPool: (pool: Omit<Pool, "id">) => void;
@@ -226,6 +230,7 @@ export const useDexStore = create<DexState>()(
       campaigns: seedCampaigns(),
       adminTokens: [],
       disabledTokens: [],
+      removedTokens: [],
       pools: seedPools(),
       lms: {
         round: makeFreshRound(Date.now()),
@@ -495,6 +500,21 @@ export const useDexStore = create<DexState>()(
             : s.disabledTokens.includes(symbol)
               ? s.disabledTokens
               : [...s.disabledTokens, symbol],
+        })),
+
+      removeToken: (symbol) =>
+        set((s) => ({
+          removedTokens: (s.removedTokens ?? []).includes(symbol)
+            ? s.removedTokens
+            : [...(s.removedTokens ?? []), symbol],
+          disabledTokens: s.disabledTokens.filter((sym) => sym !== symbol),
+        })),
+
+      restoreToken: (symbol) =>
+        set((s) => ({
+          removedTokens: (s.removedTokens ?? []).filter(
+            (sym) => sym !== symbol,
+          ),
         })),
 
       addPool: (pool) =>

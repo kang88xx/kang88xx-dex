@@ -475,9 +475,12 @@ function SwapTokensManager() {
   const { all } = useTokenRegistry();
   const adminTokens = useDexStore((s) => s.adminTokens);
   const disabledTokens = useDexStore((s) => s.disabledTokens);
+  const removedTokens = useDexStore((s) => s.removedTokens);
   const addAdminToken = useDexStore((s) => s.addAdminToken);
   const removeAdminToken = useDexStore((s) => s.removeAdminToken);
   const setTokenEnabled = useDexStore((s) => s.setTokenEnabled);
+  const removeToken = useDexStore((s) => s.removeToken);
+  const restoreToken = useDexStore((s) => s.restoreToken);
 
   const [address, setAddress] = useState("");
   // Manual edits, scoped to the address they were typed for, so switching
@@ -531,7 +534,6 @@ function SwapTokensManager() {
   const setEdit = (patch: Partial<typeof edits>) =>
     setEdits((e) => ({ addr: addrKey, ...(e.addr === addrKey ? e : {}), ...patch }));
   const setSymbol = (v: string) => setEdit({ symbol: v });
-  const setName = (v: string) => setEdit({ name: v });
   const setDecimals = (v: string) => setEdit({ decimals: v });
 
   const submit = (e: React.FormEvent) => {
@@ -620,14 +622,8 @@ function SwapTokensManager() {
               />
             </Field>
           </div>
-          <Field label="Name">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Test Tether"
-              className={INPUT}
-            />
-          </Field>
+          {/* Name is auto-read from the contract (shown in the token picker /
+              portfolio); falls back to the symbol — no manual input needed. */}
         </div>
 
         <button
@@ -684,13 +680,19 @@ function SwapTokensManager() {
                   >
                     <Power className="h-4 w-4" />
                   </button>
-                  {custom && (
+                  {/* BNB stays: it's the gas token and the routing hop. */}
+                  {t.symbol !== "BNB" && (
                     <button
                       onClick={() => {
-                        removeAdminToken(t.symbol);
-                        toast.info(`Removed ${t.symbol}`);
+                        if (custom) removeAdminToken(t.symbol);
+                        else removeToken(t.symbol);
+                        toast.info(
+                          custom
+                            ? `Removed ${t.symbol}`
+                            : `${t.symbol} 취급 중단됨 — 아래에서 복원 가능`,
+                        );
                       }}
-                      title="Remove custom token"
+                      title={custom ? "Remove custom token" : "취급 중단 (목록에서 제거)"}
                       className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--down)] transition-colors hover:bg-[var(--down-soft)]"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -701,6 +703,31 @@ function SwapTokensManager() {
             );
           })}
         </div>
+
+        {/* Delisted static tokens — restorable (custom tokens delete outright). */}
+        {(removedTokens ?? []).length > 0 && (
+          <div className="mt-4 rounded-2xl border border-dashed border-[var(--border-strong)] px-4 py-3">
+            <p className="text-xs font-medium text-[var(--muted)]">
+              취급 중단된 토큰
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {removedTokens.map((sym) => (
+                <button
+                  key={sym}
+                  onClick={() => {
+                    restoreToken(sym);
+                    toast.success(`${sym} 복원됨`);
+                  }}
+                  title="복원"
+                  className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] px-3 py-1 text-xs font-medium text-[var(--muted)] transition-colors hover:bg-[var(--surface)] hover:text-[var(--foreground)]"
+                >
+                  <Plus className="h-3 w-3" />
+                  {sym}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
