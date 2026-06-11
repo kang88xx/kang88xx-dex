@@ -648,6 +648,18 @@ function OnchainGame() {
       : 0;
   const claimable = pending + unsettledWin;
 
+  // An expired round isn't settled on-chain until the next bet/claim, but we
+  // present the board as the NEXT round already waiting — so the game never
+  // looks stuck on a finished round, with or without the winner claiming.
+  // (The just-ended winner's pot stays parked in the claim card below.)
+  const heroWaiting = waiting || expired;
+  const displayRoundNo = round ? round.id + 1 + (expired ? 1 : 0) : null;
+  const displayPrizePool = expired ? 0 : prizePool;
+  const displayBurned = expired ? 0 : burned;
+  const displayPlayers = round && !expired ? round.uniquePlayers : expired ? 0 : null;
+  const displayBetCount = round && !expired ? round.betCount : expired ? 0 : null;
+  const displayLastBettor = expired ? null : lastBettor;
+
   // Recent bets + round history straight from contract events.
   const { data: recentBets } = useQuery({
     queryKey: ["lms-recent-bets", contract, round?.id],
@@ -699,6 +711,10 @@ function OnchainGame() {
   });
 
   const refreshAll = () => queryClient.invalidateQueries();
+
+  // Recent bets belong to the round being settled — once it ends we present a
+  // fresh round, so the list reads empty until the new round takes bets.
+  const shownBets = expired ? [] : (recentBets ?? []);
 
   const requireWallet = (): boolean => {
     if (!wallet || !publicClient) {
@@ -808,7 +824,7 @@ function OnchainGame() {
                 Last Man Standing
               </h1>
               <span className="inline-flex items-center gap-1 rounded-full border border-[var(--up)]/40 bg-[var(--up-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--up)]">
-                On-chain · {round ? `Round #${round.id + 1}` : "…"}
+                On-chain · {displayRoundNo != null ? `Round #${displayRoundNo}` : "…"}
               </span>
             </div>
             <p className="text-sm text-[var(--muted)]">
@@ -831,53 +847,52 @@ function OnchainGame() {
       {/* Hero countdown card */}
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-6 sm:p-10 shadow-2xl mb-5 flex flex-col items-center text-center">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-[var(--muted)] mb-3">
-          {waiting
-            ? "Waiting for first bet"
-            : expired
-              ? "Round ended"
-              : "Time Remaining"}
+          {heroWaiting ? "Waiting for first bet" : "Time Remaining"}
         </span>
 
         <div
           className="font-mono text-7xl sm:text-8xl font-bold tabular-nums leading-none mb-4"
           style={{
-            color: waiting
+            color: heroWaiting
               ? "var(--muted-2)"
               : remainingMs < 10_000
                 ? "var(--down)"
                 : "var(--foreground)",
           }}
         >
-          {waiting ? "--:--" : mmss(remainingMs)}
+          {heroWaiting ? "--:--" : mmss(remainingMs)}
         </div>
 
+        {/* Genuine new round (no first bet yet). */}
         {waiting && (
           <p className="mb-3 text-xs text-[var(--muted)]">
             첫 베팅이 들어오면 타이머가 시작됩니다
           </p>
         )}
 
-        {/* Expired round → bet()/claim() settle it automatically on-chain. */}
+        {/* Previous round just ended → a fresh round is already open; the
+            winner's pot waits in the claim card. bet()/claim() settle the old
+            round on-chain automatically. */}
         {expired && (
           <p className="mb-3 text-xs text-[var(--muted)]">
-            {lastBettor
-              ? "승자는 아래에서 바로 클레임할 수 있고, 다음 베팅이 자동으로 새 라운드를 시작합니다"
-              : "다음 베팅이 자동으로 새 라운드를 시작합니다"}
+            이전 라운드 종료 · 첫 베팅이 새 라운드를 시작합니다
+            {unsettledWin > 0 && " — 당신의 상금은 아래에서 클레임하세요"}
           </p>
         )}
 
-        {/* Last bettor */}
+        {/* Last bettor (hidden once the round ends — the new round has none). */}
         <div className="text-sm text-[var(--muted)]">
-          {lastBettor ? (
+          {displayLastBettor ? (
             <>
-              {expired ? "Winner:" : "Last bettor:"}{" "}
+              Last bettor:{" "}
               <span className="font-mono font-semibold text-[var(--foreground)]">
-                {shortAddress(lastBettor)}
-                {wallet && lastBettor.toLowerCase() === wallet.toLowerCase() && (
-                  <span className="ml-1.5 inline-flex items-center rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)]">
-                    YOU
-                  </span>
-                )}
+                {shortAddress(displayLastBettor)}
+                {wallet &&
+                  displayLastBettor.toLowerCase() === wallet.toLowerCase() && (
+                    <span className="ml-1.5 inline-flex items-center rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)]">
+                      YOU
+                    </span>
+                  )}
               </span>
             </>
           ) : (
@@ -891,26 +906,26 @@ function OnchainGame() {
         <StatCard
           icon={<TrendingUp className="h-4 w-4" />}
           label="Prize Pool"
-          value={`${formatNumber(prizePool, 2)} KANG`}
+          value={`${formatNumber(displayPrizePool, 2)} KANG`}
           detail="80% of bets"
           accent
         />
         <StatCard
           icon={<Users className="h-4 w-4" />}
           label="Players"
-          value={round ? String(round.uniquePlayers) : "—"}
+          value={displayPlayers != null ? String(displayPlayers) : "—"}
           detail="this round"
         />
         <StatCard
           icon={<Clock className="h-4 w-4" />}
           label="Total Bets"
-          value={round ? String(round.betCount) : "—"}
+          value={displayBetCount != null ? String(displayBetCount) : "—"}
           detail="this round"
         />
         <StatCard
           icon={<Flame className="h-4 w-4" />}
           label="Burned"
-          value={`${formatNumber(burned, 2)} KANG`}
+          value={`${formatNumber(displayBurned, 2)} KANG`}
           detail="5% of bets"
         />
       </div>
@@ -1092,10 +1107,10 @@ function OnchainGame() {
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold">Recent Bets</h3>
               <span className="text-xs text-[var(--muted-2)]">
-                {recentBets?.length ?? 0} shown
+                {shownBets.length} shown
               </span>
             </div>
-            {!recentBets || recentBets.length === 0 ? (
+            {shownBets.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-[var(--border)] px-3 py-6 text-center text-xs text-[var(--muted-2)]">
                 No bets yet — be the first.
               </p>
@@ -1106,7 +1121,7 @@ function OnchainGame() {
                   <span>Amount</span>
                   <span>Block</span>
                 </div>
-                {recentBets.map((bet) => (
+                {shownBets.map((bet) => (
                   <div
                     key={bet.key}
                     className="grid grid-cols-[1fr_auto_auto] gap-2 items-center rounded-xl px-2 py-1.5 text-xs"
