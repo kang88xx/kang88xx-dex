@@ -420,6 +420,8 @@ function AdminDashboard() {
                 )}
               </div>
             )}
+
+            <LegacySweepTool />
           </div>
         </div>
       </div>
@@ -431,6 +433,114 @@ function AdminDashboard() {
       <div className="mt-10">
         <PoolsManager />
       </div>
+    </div>
+  );
+}
+
+// Last pre-v5 MerkleAirdrop deployment — prefilled in the recovery tool so
+// sweeping a campaign stranded there is paste-free.
+const LEGACY_AIRDROP_V4 = "0x755f35bf4fa91fda72301d7ce374b710bf87670b";
+
+/**
+ * Recovery console for campaigns stranded on a PREVIOUS airdrop contract
+ * (env cutovers leave them unreachable from the campaign cards, which only
+ * talk to the current contract). Calls endAndSweep(id, wallet) on any
+ * MerkleAirdrop address with the connected owner wallet.
+ */
+function LegacySweepTool() {
+  const { address: wallet, chainId } = useAccount();
+  const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
+  const [open, setOpen] = useState(false);
+  const [contractAddr, setContractAddr] = useState(LEGACY_AIRDROP_V4);
+  const [campaignId, setCampaignId] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const sweep = async () => {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(contractAddr))
+      return toast.error("컨트랙트 주소가 올바르지 않습니다");
+    const id = parseInt(campaignId, 10);
+    if (!Number.isFinite(id) || id <= 0)
+      return toast.error("캠페인 ID(숫자)를 입력하세요");
+    if (!wallet || !publicClient) return toast.error("지갑을 연결하세요");
+    if (chainId !== CHAIN_ID)
+      return toast.error("지갑 네트워크를 BSC로 전환하세요");
+    try {
+      setBusy(true);
+      const target = contractAddr as `0x${string}`;
+      const owner = (await publicClient.readContract({
+        address: target,
+        abi: AIRDROP_ABI,
+        functionName: "owner",
+      })) as string;
+      if (owner.toLowerCase() !== wallet.toLowerCase())
+        return toast.error(
+          `해당 컨트랙트의 소유자 지갑이 아닙니다 — ${shortAddress(owner)}로 연결하세요 (현재 ${shortAddress(wallet)})`,
+        );
+      toast.info("종료·회수 트랜잭션 전송 중… 지갑에서 확인하세요");
+      const hash = await writeContractAsync({
+        address: target,
+        abi: AIRDROP_ABI,
+        functionName: "endAndSweep",
+        args: [BigInt(id), wallet],
+        chainId: CHAIN_ID,
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") return toast.error("트랜잭션 실패");
+      toast.success(
+        `캠페인 #${id} 회수 완료 — 미클레임 물량이 지갑으로 돌아왔습니다`,
+      );
+      setCampaignId("");
+    } catch {
+      toast.error("회수 실패 — 주소 / 캠페인 ID / 잔여 물량을 확인하세요");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)]"
+      >
+        <span>이전 컨트랙트 회수 도구</span>
+        <span className="text-xs">{open ? "접기 ▲" : "펼치기 ▼"}</span>
+      </button>
+      {open && (
+        <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <p className="text-xs leading-relaxed text-[var(--muted)]">
+            컨트랙트 교체 이전 버전에 남은 캠페인의 미클레임 물량을 회수합니다.
+            해당 컨트랙트의 소유자 지갑으로 연결한 뒤 캠페인 ID를 입력하세요 —
+            즉시 종료되고 잔여 물량이 지갑으로 전송됩니다.
+          </p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <input
+              value={contractAddr}
+              onChange={(e) => setContractAddr(e.target.value.trim())}
+              placeholder="0x… 컨트랙트 주소"
+              spellCheck={false}
+              className={`${INPUT} font-mono text-xs sm:flex-1`}
+            />
+            <input
+              value={campaignId}
+              onChange={(e) => setCampaignId(e.target.value)}
+              placeholder="캠페인 ID"
+              inputMode="numeric"
+              className={`${INPUT} sm:w-28`}
+            />
+            <button
+              onClick={sweep}
+              disabled={busy}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[var(--down)] px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {busy ? "회수 중…" : "종료 + 회수"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
