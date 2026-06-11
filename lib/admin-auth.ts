@@ -36,6 +36,19 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(da, db);
 }
 
+/**
+ * Client IP for rate limiting. x-real-ip is set by the platform (Vercel) and
+ * can't be spoofed; fallback is the LAST x-forwarded-for entry — proxies
+ * append the real peer IP, so the first entry is client-controlled but the
+ * last isn't.
+ */
+export function clientIp(req: Request): string {
+  const real = req.headers.get("x-real-ip")?.trim();
+  if (real) return real;
+  const fwd = req.headers.get("x-forwarded-for")?.split(",") ?? [];
+  return fwd.at(-1)?.trim() || "local";
+}
+
 export function verifyPassword(password: string): boolean {
   const expected = process.env.ADMIN_PASSWORD;
   if (!expected || !password) return false;

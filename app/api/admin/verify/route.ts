@@ -1,23 +1,27 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import {
   ADMIN_COOKIE,
   adminConfigured,
   clearRateLimit,
   clientIp,
-  createSessionToken,
   rateLimitLogin,
-  SESSION_TTL_S,
   verifyPassword,
+  verifySessionToken,
 } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
+// Re-authentication for destructive admin actions (delete token/pool/
+// campaign): requires BOTH a valid admin session and the password again.
+// Shares the login rate limiter so brute-forcing here is throttled too.
 export async function POST(req: Request) {
   if (!adminConfigured()) {
-    return NextResponse.json(
-      { error: "Admin login is not configured on this server" },
-      { status: 503 },
-    );
+    return NextResponse.json({ error: "not configured" }, { status: 503 });
+  }
+  const token = (await cookies()).get(ADMIN_COOKIE)?.value;
+  if (!verifySessionToken(token)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const ip = clientIp(req);
@@ -31,19 +35,10 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as {
     password?: string;
   } | null;
-
   if (!body?.password || !verifyPassword(body.password)) {
     return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
   }
 
   clearRateLimit(ip);
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set(ADMIN_COOKIE, createSessionToken(), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: SESSION_TTL_S,
-  });
-  return res;
+  return NextResponse.json({ ok: true });
 }

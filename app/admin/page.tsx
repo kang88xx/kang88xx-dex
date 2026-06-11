@@ -337,6 +337,10 @@ function PoolsManager() {
   const [token0, setToken0] = useState(symbols[0] ?? "BNB");
   const [token1, setToken1] = useState(symbols[1] ?? "USDT");
   const [feeTier, setFeeTier] = useState("0.25");
+  // Delete goes through the password-gated confirm modal.
+  const [deleteTarget, setDeleteTarget] = useState<(typeof pools)[number] | null>(
+    null,
+  );
   // TVL / volume / APR are computed live from on-chain reserves + 24h volume
   // (see usePoolStats), so they're no longer entered here — stored as 0.
   const stats = usePoolStats(pools);
@@ -479,22 +483,7 @@ function PoolsManager() {
                   <Power className="h-4 w-4" />
                 </button>
                 <button
-                  onClick={() => {
-                    // Deleting only drops the site listing — the on-chain pair
-                    // and users' LP tokens are untouched, but holders lose this
-                    // site's withdraw UI. Warn when the pool has liquidity.
-                    if (
-                      stats[p.id]?.available &&
-                      stats[p.id].tvlUsd > 0 &&
-                      !window.confirm(
-                        `${p.token0}/${p.token1} 풀에 온체인 유동성(${formatUsd(stats[p.id].tvlUsd, { compact: true })})이 있습니다.\n` +
-                          "삭제해도 온체인 자금은 그대로지만, LP 보유자가 이 사이트에서 출금할 수 없게 됩니다 (숨김을 권장).\n계속 삭제할까요?",
-                      )
-                    )
-                      return;
-                    removePool(p.id);
-                    toast.info(`Removed ${p.token0}/${p.token1} pool`);
-                  }}
+                  onClick={() => setDeleteTarget(p)}
                   title="Remove pool"
                   className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--down)] transition-colors hover:bg-[var(--down-soft)]"
                 >
@@ -506,6 +495,29 @@ function PoolsManager() {
           })}
         </div>
       </div>
+
+      <DeleteConfirmModal
+        open={deleteTarget !== null}
+        title={`${deleteTarget?.token0 ?? ""}/${deleteTarget?.token1 ?? ""} 풀 삭제`}
+        description={
+          // Deleting only drops the site listing — the on-chain pair and
+          // users' LP tokens are untouched, but holders lose this site's
+          // withdraw UI. Warn extra when the pool has liquidity.
+          (deleteTarget &&
+          stats[deleteTarget.id]?.available &&
+          stats[deleteTarget.id].tvlUsd > 0
+            ? `⚠️ 이 풀에 온체인 유동성(${formatUsd(stats[deleteTarget.id].tvlUsd, { compact: true })})이 있습니다. 삭제해도 온체인 자금은 그대로지만, LP 보유자가 이 사이트에서 출금할 수 없게 됩니다 — 숨김(전원 버튼)을 권장합니다.\n\n`
+            : "") +
+          "사이트 목록에서 이 풀을 제거합니다. 온체인 페어와 LP 토큰에는 영향이 없습니다."
+        }
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          removePool(deleteTarget.id);
+          toast.info(`Removed ${deleteTarget.token0}/${deleteTarget.token1} pool`);
+          setDeleteTarget(null);
+        }}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
@@ -523,6 +535,11 @@ function SwapTokensManager() {
   const restoreToken = useDexStore((s) => s.restoreToken);
 
   const [address, setAddress] = useState("");
+  // Delete goes through the password-gated confirm modal.
+  const [deleteTarget, setDeleteTarget] = useState<{
+    symbol: string;
+    custom: boolean;
+  } | null>(null);
   // Manual edits, scoped to the address they were typed for, so switching
   // addresses re-shows that token's auto-detected values (no effect needed).
   const [edits, setEdits] = useState<{
@@ -723,15 +740,7 @@ function SwapTokensManager() {
                   {/* BNB stays: it's the gas token and the routing hop. */}
                   {t.symbol !== "BNB" && (
                     <button
-                      onClick={() => {
-                        if (custom) removeAdminToken(t.symbol);
-                        else removeToken(t.symbol);
-                        toast.info(
-                          custom
-                            ? `Removed ${t.symbol}`
-                            : `${t.symbol} 취급 중단됨 — 아래에서 복원 가능`,
-                        );
-                      }}
+                      onClick={() => setDeleteTarget({ symbol: t.symbol, custom })}
                       title={custom ? "Remove custom token" : "취급 중단 (목록에서 제거)"}
                       className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--down)] transition-colors hover:bg-[var(--down-soft)]"
                     >
@@ -769,6 +778,29 @@ function SwapTokensManager() {
           </div>
         )}
       </div>
+
+      <DeleteConfirmModal
+        open={deleteTarget !== null}
+        title={`${deleteTarget?.symbol ?? ""} ${deleteTarget?.custom ? "삭제" : "취급 중단"}`}
+        description={
+          deleteTarget?.custom
+            ? `커스텀 토큰 ${deleteTarget.symbol}을(를) 완전히 삭제합니다. 다시 쓰려면 컨트랙트 주소로 재등록해야 합니다.`
+            : `${deleteTarget?.symbol} 토큰을 취급 중단합니다 — 스왑 목록과 홈 시세에서 사라집니다. '취급 중단된 토큰'에서 복원할 수 있습니다.`
+        }
+        confirmLabel={deleteTarget?.custom ? "삭제" : "취급 중단"}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          if (deleteTarget.custom) removeAdminToken(deleteTarget.symbol);
+          else removeToken(deleteTarget.symbol);
+          toast.info(
+            deleteTarget.custom
+              ? `Removed ${deleteTarget.symbol}`
+              : `${deleteTarget.symbol} 취급 중단됨 — 아래에서 복원 가능`,
+          );
+          setDeleteTarget(null);
+        }}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
@@ -1046,6 +1078,8 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
   const [txBusy, setTxBusy] = useState(false);
+  // Delete/end goes through the password-gated confirm modal.
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // Launched on-chain → pause/end must be real transactions, not local state.
   const launched = c.onchainId != null;
 
@@ -1099,13 +1133,6 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
       return;
     }
     if (!requireWallet()) return;
-    if (
-      !window.confirm(
-        `온체인 캠페인 #${c.onchainId}을(를) 즉시 종료합니다.\n` +
-          `클레임이 바로 중단되고, 미클레임 물량 전부가 연결된 지갑(${wallet!.slice(0, 6)}…${wallet!.slice(-4)})으로 회수됩니다.\n계속할까요?`,
-      )
-    )
-      return;
     try {
       setTxBusy(true);
       toast.info("종료·회수 트랜잭션 전송 중… 지갑에서 확인하세요");
@@ -1193,7 +1220,7 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
             )}
           </button>
           <button
-            onClick={removeCampaign}
+            onClick={() => setConfirmDelete(true)}
             disabled={txBusy}
             title={launched ? "즉시 종료 + 미클레임 회수" : "Delete"}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--down)] transition-colors hover:bg-[var(--down-soft)] disabled:cursor-not-allowed disabled:opacity-50"
@@ -1220,6 +1247,22 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
 
       {c.eligibility === "whitelist" && <WhitelistManager campaign={c} />}
       {c.eligibility === "public" && <PublicLaunchPanel campaign={c} />}
+
+      <DeleteConfirmModal
+        open={confirmDelete}
+        title={launched ? `캠페인 #${c.onchainId} 즉시 종료` : `"${c.name}" 삭제`}
+        description={
+          launched
+            ? `온체인 캠페인 #${c.onchainId}을(를) 즉시 종료합니다. 클레임이 바로 중단되고, 미클레임 물량 전부가 연결된 오너 지갑으로 회수됩니다. 되돌릴 수 없습니다.`
+            : `"${c.name}" 캠페인 드래프트를 삭제합니다 (화이트리스트 명단 포함).`
+        }
+        confirmLabel={launched ? "종료 + 회수" : "삭제"}
+        onConfirm={() => {
+          setConfirmDelete(false);
+          void removeCampaign();
+        }}
+        onClose={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }
@@ -1227,6 +1270,114 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
 /** Wall-clock check kept outside the component for the react-compiler purity lint. */
 function isPastMs(ms: number): boolean {
   return ms !== 0 && ms <= Date.now();
+}
+
+/**
+ * Destructive-action gate: confirmation modal that re-verifies the admin
+ * password server-side (/api/admin/verify) before running onConfirm.
+ */
+function DeleteConfirmModal({
+  open,
+  title,
+  description,
+  confirmLabel = "삭제",
+  onConfirm,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  confirmLabel?: string;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  if (!open) return null;
+
+  const cancel = () => {
+    setPassword("");
+    onClose();
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!password) return toast.error("어드민 비밀번호를 입력하세요");
+    try {
+      setVerifying(true);
+      const res = await fetch("/api/admin/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      if (res.status === 429)
+        return toast.error("시도 횟수 초과 — 10분 후 다시 시도하세요");
+      if (!res.ok) return toast.error("비밀번호가 올바르지 않습니다");
+      setPassword("");
+      onClose();
+      onConfirm();
+    } catch {
+      toast.error("확인 요청 실패 — 네트워크를 확인하세요");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-start justify-center bg-black/50 p-4 pt-32">
+      <div className="absolute inset-0" onClick={cancel} aria-hidden />
+      <form
+        onSubmit={submit}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="animate-fade-in relative w-full max-w-sm rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-2xl"
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <Trash2 className="h-4 w-4 text-[var(--down)]" />
+            {title}
+          </h3>
+          <button
+            type="button"
+            onClick={cancel}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--surface)]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mt-3 whitespace-pre-line text-xs leading-relaxed text-[var(--muted)]">
+          {description}
+        </p>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="어드민 비밀번호"
+          autoFocus
+          autoComplete="current-password"
+          className={`${INPUT} mt-4`}
+        />
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={cancel}
+            className="flex-1 rounded-2xl border border-[var(--border-strong)] py-2.5 text-sm font-medium text-[var(--muted)] transition-colors hover:bg-[var(--surface)] hover:text-[var(--foreground)]"
+          >
+            취소
+          </button>
+          <button
+            type="submit"
+            disabled={verifying}
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[var(--down)] py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {verifying && <Loader2 className="h-4 w-4 animate-spin" />}
+            {verifying ? "확인 중…" : confirmLabel}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }
 
 const ZERO_ROOT =
