@@ -327,8 +327,10 @@ function AdminDashboard() {
 /** Admin management of liquidity pools (only pools that actually exist). */
 function PoolsManager() {
   const pools = useDexStore((s) => s.pools);
+  const hiddenPools = useDexStore((s) => s.hiddenPools);
   const addPool = useDexStore((s) => s.addPool);
   const removePool = useDexStore((s) => s.removePool);
+  const setPoolVisible = useDexStore((s) => s.setPoolVisible);
   const { tradable } = useTokenRegistry();
   const symbols = tradable.map((t) => t.symbol);
 
@@ -431,7 +433,9 @@ function PoolsManager() {
               No pools — create one on the left.
             </div>
           )}
-          {pools.map((p) => (
+          {pools.map((p) => {
+            const visible = !(hiddenPools ?? []).includes(p.id);
+            return (
             <div
               key={p.id}
               className="flex items-center justify-between rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
@@ -439,8 +443,13 @@ function PoolsManager() {
               <div className="flex items-center gap-3">
                 <TokenPair token0={p.token0} token1={p.token1} />
                 <div>
-                  <div className="text-sm font-semibold">
+                  <div className="flex items-center gap-2 text-sm font-semibold">
                     {p.token0} / {p.token1}
+                    {!visible && (
+                      <span className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)]">
+                        숨김
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-[var(--muted)]">
                     {p.feeTier}% fee ·{" "}
@@ -452,18 +461,49 @@ function PoolsManager() {
                   </div>
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  removePool(p.id);
-                  toast.info(`Removed ${p.token0}/${p.token1} pool`);
-                }}
-                title="Remove pool"
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--down)] transition-colors hover:bg-[var(--down-soft)]"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    setPoolVisible(p.id, !visible);
+                    toast.info(
+                      visible
+                        ? `${p.token0}/${p.token1} 풀 숨김 — 기존 LP는 출금 가능`
+                        : `${p.token0}/${p.token1} 풀 표시됨`,
+                    );
+                  }}
+                  title={visible ? "프론트에서 숨기기" : "프론트에 표시"}
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-[var(--surface)] ${
+                    visible ? "text-[var(--up)]" : "text-[var(--muted-2)]"
+                  }`}
+                >
+                  <Power className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    // Deleting only drops the site listing — the on-chain pair
+                    // and users' LP tokens are untouched, but holders lose this
+                    // site's withdraw UI. Warn when the pool has liquidity.
+                    if (
+                      stats[p.id]?.available &&
+                      stats[p.id].tvlUsd > 0 &&
+                      !window.confirm(
+                        `${p.token0}/${p.token1} 풀에 온체인 유동성(${formatUsd(stats[p.id].tvlUsd, { compact: true })})이 있습니다.\n` +
+                          "삭제해도 온체인 자금은 그대로지만, LP 보유자가 이 사이트에서 출금할 수 없게 됩니다 (숨김을 권장).\n계속 삭제할까요?",
+                      )
+                    )
+                      return;
+                    removePool(p.id);
+                    toast.info(`Removed ${p.token0}/${p.token1} pool`);
+                  }}
+                  title="Remove pool"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--down)] transition-colors hover:bg-[var(--down-soft)]"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

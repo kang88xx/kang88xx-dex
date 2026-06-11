@@ -33,6 +33,13 @@ function usdText(
 export default function PoolsPage() {
   const hydrated = useHydrated();
   const pools = useDexStore((s) => s.pools);
+  const hiddenPools = useDexStore((s) => s.hiddenPools);
+  // Hidden pools drop out of the public list, but positions below still scan
+  // ALL pools so existing LPs can always withdraw.
+  const visiblePools = useMemo(() => {
+    const hidden = new Set(hiddenPools ?? []);
+    return pools.filter((p) => !hidden.has(p.id));
+  }, [pools, hiddenPools]);
   const stats = usePoolStats(pools);
   const onchain = usePoolsOnchain(pools);
   const tokenMap = useAllTokenMap();
@@ -146,7 +153,7 @@ export default function PoolsPage() {
             </tr>
           </thead>
           <tbody>
-            {pools.length === 0 && (
+            {visiblePools.length === 0 && (
               <tr>
                 <td
                   colSpan={5}
@@ -156,7 +163,7 @@ export default function PoolsPage() {
                 </td>
               </tr>
             )}
-            {pools.map((p) => {
+            {visiblePools.map((p) => {
               const hasPos = positionIds.has(p.id);
               return (
                 <tr

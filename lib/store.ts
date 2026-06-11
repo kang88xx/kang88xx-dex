@@ -162,6 +162,7 @@ interface DexState {
 
   // admin-managed liquidity pools (only pools that actually exist)
   pools: Pool[];
+  hiddenPools: string[]; // pool ids hidden from the public /pools list
 
   // Last Man Standing
   lms: {
@@ -217,6 +218,8 @@ interface DexState {
   // admin — liquidity pools
   addPool: (pool: Omit<Pool, "id">) => void;
   removePool: (id: string) => void;
+  /** Hide/show a pool on the public /pools list (positions stay withdrawable). */
+  setPoolVisible: (id: string, visible: boolean) => void;
 }
 
 export const useDexStore = create<DexState>()(
@@ -232,6 +235,7 @@ export const useDexStore = create<DexState>()(
       disabledTokens: [],
       removedTokens: [],
       pools: seedPools(),
+      hiddenPools: [],
       lms: {
         round: makeFreshRound(Date.now()),
         history: [],
@@ -527,7 +531,19 @@ export const useDexStore = create<DexState>()(
         }),
 
       removePool: (id) =>
-        set((s) => ({ pools: s.pools.filter((p) => p.id !== id) })),
+        set((s) => ({
+          pools: s.pools.filter((p) => p.id !== id),
+          hiddenPools: (s.hiddenPools ?? []).filter((pid) => pid !== id),
+        })),
+
+      setPoolVisible: (id, visible) =>
+        set((s) => ({
+          hiddenPools: visible
+            ? (s.hiddenPools ?? []).filter((pid) => pid !== id)
+            : (s.hiddenPools ?? []).includes(id)
+              ? s.hiddenPools
+              : [...(s.hiddenPools ?? []), id],
+        })),
     }),
     {
       // bumped from helix-dex-store → reseeds with IOI tokens/campaigns
