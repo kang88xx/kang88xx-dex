@@ -1231,6 +1231,7 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
   const togglePause = async () => {
     if (!launched) return updateCampaign(c.id, { active: !c.active });
     if (!requireWallet()) return;
+    if (!(await ensureContractOwner(publicClient!, wallet!))) return;
     const next = !isActive;
     try {
       setTxBusy(true);
@@ -1270,6 +1271,7 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
       return;
     }
     if (!requireWallet()) return;
+    if (!(await ensureContractOwner(publicClient!, wallet!))) return;
     try {
       setTxBusy(true);
       toast.info("종료·회수 트랜잭션 전송 중… 지갑에서 확인하세요");
@@ -1442,6 +1444,34 @@ function isPastMs(ms: number): boolean {
 }
 
 /**
+ * Owner pre-check for owner-only contract actions (launch / pause / sweep /
+ * updateRoot). The contract just reverts "not owner", so without this the
+ * admin only sees a generic failure — here they get told WHICH wallet to
+ * connect. RPC failure → optimistically true (the tx surfaces the real error).
+ */
+async function ensureContractOwner(
+  publicClient: { readContract: (args: never) => Promise<unknown> },
+  wallet: string,
+): Promise<boolean> {
+  try {
+    const owner = (await publicClient.readContract({
+      address: AIRDROP_CONTRACT as `0x${string}`,
+      abi: AIRDROP_ABI,
+      functionName: "owner",
+    } as never)) as string;
+    if (owner.toLowerCase() !== wallet.toLowerCase()) {
+      toast.error(
+        `컨트랙트 소유자 지갑이 아닙니다 — ${shortAddress(owner)} 지갑으로 연결하세요 (현재 ${shortAddress(wallet)})`,
+      );
+      return false;
+    }
+  } catch {
+    // owner() read failed — let the tx attempt report the real error
+  }
+  return true;
+}
+
+/**
  * Destructive-action gate: confirmation modal that re-verifies the admin
  * password server-side (/api/admin/verify) before running onConfirm.
  */
@@ -1583,6 +1613,7 @@ function PublicLaunchPanel({ campaign: c }: { campaign: AirdropCampaign }) {
       return toast.error("지갑당 수량(amountPerClaim)이 0보다 커야 합니다");
     if (c.amountPerClaim > c.totalAllocation)
       return toast.error("지갑당 수량이 총 할당보다 클 수 없습니다");
+    if (!(await ensureContractOwner(publicClient, wallet))) return;
 
     try {
       setLaunching(true);
@@ -1770,6 +1801,7 @@ function WhitelistManager({
       return toast.error(`${c.tokenSymbol}는 토큰 컨트랙트가 없습니다`);
     if (c.whitelist.length === 0)
       return toast.error("화이트리스트가 비어 있습니다");
+    if (!(await ensureContractOwner(publicClient, wallet))) return;
     // Block funding top-ups that v4 can never pay out: a claimed wallet's
     // grown allocation is unreachable behind the permanent hasClaimed flag,
     // so the delta would sit stranded in the contract until sweep.
@@ -1912,6 +1944,7 @@ function WhitelistManager({
       );
     if (c.whitelist.length === 0)
       return toast.error("화이트리스트가 비어 있습니다");
+    if (!(await ensureContractOwner(publicClient, wallet))) return;
 
     try {
       setLaunching(true);
