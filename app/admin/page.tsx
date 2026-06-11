@@ -5,6 +5,7 @@ import { erc20Abi, parseUnits, parseEventLogs } from "viem";
 import {
   useAccount,
   usePublicClient,
+  useReadContract,
   useReadContracts,
   useWriteContract,
 } from "wagmi";
@@ -1083,6 +1084,24 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
   // Launched on-chain → pause/end must be real transactions, not local state.
   const launched = c.onchainId != null;
 
+  // For launched campaigns the chain's `active` flag is what actually gates
+  // claims — drive the badge and the Power toggle from it, not from the
+  // persisted local copy (which goes stale when a receipt wait times out or
+  // the campaign is paused from another browser).
+  const { data: onchainRow, refetch: refetchOnchain } = useReadContract({
+    address: launched && airdropLive ? (AIRDROP_CONTRACT as `0x${string}`) : undefined,
+    abi: AIRDROP_ABI,
+    functionName: "campaigns",
+    args: launched ? [BigInt(c.onchainId!)] : undefined,
+    chainId: CHAIN_ID,
+    query: { enabled: launched && airdropLive, refetchInterval: 30_000 },
+  });
+  const onchainActive =
+    onchainRow !== undefined
+      ? (onchainRow as readonly [string, string, bigint, bigint, bigint, bigint, boolean])[6]
+      : undefined;
+  const isActive = launched ? (onchainActive ?? c.active) : c.active;
+
   const requireWallet = (): boolean => {
     if (!wallet || !publicClient) {
       toast.error("지갑을 연결하세요");
@@ -1098,7 +1117,7 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
   const togglePause = async () => {
     if (!launched) return updateCampaign(c.id, { active: !c.active });
     if (!requireWallet()) return;
-    const next = !c.active;
+    const next = !isActive;
     try {
       setTxBusy(true);
       toast.info(
@@ -1119,8 +1138,12 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
       updateCampaign(c.id, { active: next });
       toast.success(next ? "캠페인 재개됨 (온체인)" : "캠페인 일시정지됨 (온체인)");
     } catch {
-      toast.error("실패 — 컨트랙트 소유자 지갑인지 확인하세요");
+      // The tx may still have landed (receipt wait can time out on testnet
+      // RPC) — the on-chain read below self-corrects the badge either way.
+      toast.error("상태 확인 실패 — 잠시 후 배지가 체인 상태로 갱신됩니다");
     } finally {
+      // Whatever happened, resync the badge with the chain.
+      void refetchOnchain();
       setTxBusy(false);
     }
   };
@@ -1171,7 +1194,7 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-semibold">{c.name}</h3>
-              {c.active ? (
+              {isActive ? (
                 <span className="rounded-full bg-[var(--up-soft)] px-2 py-0.5 text-[10px] font-medium text-[var(--up)]">
                   Active
                 </span>
@@ -1204,10 +1227,10 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
             disabled={txBusy}
             title={
               launched
-                ? c.active
+                ? isActive
                   ? "온체인 일시정지"
                   : "온체인 재개"
-                : c.active
+                : isActive
                   ? "Pause"
                   : "Activate"
             }

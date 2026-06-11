@@ -35,7 +35,9 @@ export default function AirdropPage() {
   // On-chain campaigns are the claimable source of truth — every visitor reads
   // them straight from the contract, no admin-local data needed.
   const liveOnchain = onchain.filter((c) => c.active);
-  const launchedIds = new Set(liveOnchain.map((c) => c.onchainId));
+  // Launched = exists on-chain at all (paused included) — otherwise a paused
+  // campaign's local record would wrongly reappear as a "preview" draft.
+  const launchedIds = new Set(onchain.map((c) => c.onchainId));
 
   // Local campaigns not yet launched on-chain → shown as previews (not claimable).
   const drafts = localCampaigns.filter(
