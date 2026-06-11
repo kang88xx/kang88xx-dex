@@ -142,9 +142,16 @@ function OnchainCampaignCard({
   const soldOut = c.isPublic
     ? remainingWei < c.amountPerClaimWei
     : remainingWei <= 0n;
-  // Progress denominator = the allocation entered at LAUNCH (stable even when
-  // the admin grows the whitelist later); live funded is only the fallback.
-  const totalForBar = c.launchFunded ?? c.funded;
+  // Progress denominator = the total allocation the admin set at creation
+  // (e.g. 1,000,000), not the on-chain funded amount — which for a whitelist
+  // campaign is only the current whitelist sum (e.g. 24,000) and grows as
+  // people are added. Falls back to on-chain launch funding, then live funded,
+  // for visitors whose browser has no local campaign record.
+  const localMatch = localCampaigns.find((lc) => lc.onchainId === c.onchainId);
+  const totalForBar =
+    localMatch && localMatch.totalAllocation > 0
+      ? localMatch.totalAllocation
+      : (c.launchFunded ?? c.funded);
   const progress =
     totalForBar > 0 ? Math.min(100, (c.claimed / totalForBar) * 100) : 0;
 
@@ -156,9 +163,7 @@ function OnchainCampaignCard({
     c.onchainId,
     !c.isPublic,
   );
-  const localWl = !c.isPublic
-    ? localCampaigns.find((lc) => lc.onchainId === c.onchainId)
-    : undefined;
+  const localWl = !c.isPublic ? localMatch : undefined;
 
   const wlAllocs: { address: string; amountWei: string }[] = c.isPublic
     ? []
