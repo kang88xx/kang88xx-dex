@@ -56,8 +56,10 @@ contract MerkleAirdrop {
 
     uint256 public campaignCount;
     mapping(uint256 => Campaign) public campaigns;
-    // campaignId => account => already claimed
-    mapping(uint256 => mapping(address => bool)) public hasClaimed;
+    // campaignId => account => total tokens already claimed (cumulative).
+    // v5: was a bool — tracking amounts lets a wallet whose allocation grew
+    // via updateRoot claim the difference instead of being locked out.
+    mapping(uint256 => mapping(address => uint256)) public claimedAmount;
 
     event CampaignCreated(
         uint256 indexed id,
@@ -128,27 +130,40 @@ contract MerkleAirdrop {
         emit CampaignCreated(id, token, merkleRoot, amount, endsAt, amountPerClaim, name);
     }
 
-    /** Whitelist claim: prove your (msg.sender, amount) leaf. Reverts if already claimed. */
+    /** Compat view (v4 ABI): true once the wallet has claimed anything. */
+    function hasClaimed(uint256 id, address account) external view returns (bool) {
+        return claimedAmount[id][account] > 0;
+    }
+
+    /**
+     * Whitelist claim: prove your (msg.sender, amount) leaf — `amount` is the
+     * CUMULATIVE allocation. Pays out `amount - claimedAmount`, so a wallet
+     * whose allocation grew via updateRoot can claim the difference. Reverts
+     * if there is nothing new to claim.
+     */
     function claim(uint256 id, uint256 amount, bytes32[] calldata proof) external {
         Campaign storage c = campaigns[id];
         require(c.token != address(0), "no campaign");
         require(c.merkleRoot != bytes32(0), "use claimPublic"); // public path is claimPublic
         require(c.active, "inactive");
         require(c.endsAt == 0 || block.timestamp <= c.endsAt, "ended");
-        require(!hasClaimed[id][msg.sender], "already claimed");
 
         bytes32 leaf = keccak256(
             bytes.concat(keccak256(abi.encode(msg.sender, amount)))
         );
         require(_verify(proof, c.merkleRoot, leaf), "bad proof");
 
+        uint256 already = claimedAmount[id][msg.sender];
+        require(amount > already, "nothing to claim");
+        uint256 payout = amount - already;
+
         // Effects before interaction (reentrancy-safe).
-        hasClaimed[id][msg.sender] = true;
-        c.claimed += amount;
+        claimedAmount[id][msg.sender] = amount;
+        c.claimed += payout;
         require(c.claimed <= c.funded, "exhausted");
 
-        require(IERC20(c.token).transfer(msg.sender, amount), "transfer failed");
-        emit Claimed(id, msg.sender, amount);
+        require(IERC20(c.token).transfer(msg.sender, payout), "transfer failed");
+        emit Claimed(id, msg.sender, payout);
     }
 
     /**
@@ -161,13 +176,13 @@ contract MerkleAirdrop {
         require(c.merkleRoot == bytes32(0), "use claim"); // whitelist path is claim
         require(c.active, "inactive");
         require(c.endsAt == 0 || block.timestamp <= c.endsAt, "ended");
-        require(!hasClaimed[id][msg.sender], "already claimed");
+        require(claimedAmount[id][msg.sender] == 0, "already claimed");
 
         uint256 amount = c.amountPerClaim;
         require(c.claimed + amount <= c.funded, "exhausted");
 
         // Effects before interaction (reentrancy-safe).
-        hasClaimed[id][msg.sender] = true;
+        claimedAmount[id][msg.sender] = amount;
         c.claimed += amount;
 
         require(IERC20(c.token).transfer(msg.sender, amount), "transfer failed");
@@ -202,8 +217,9 @@ contract MerkleAirdrop {
      * allocation list, then top up funding for the newly added allocations in
      * the same call (addAmount > 0 needs a prior ERC20 approve). Follow with
      * publishWhitelist(full list) so visitors can rebuild their proofs.
-     * Owner-trust note: this lets the owner change unclaimed allocations;
-     * wallets that already claimed stay claimed (hasClaimed is permanent).
+     * Owner-trust note: this lets the owner change unclaimed allocations.
+     * A wallet that already claimed can claim again only for the DIFFERENCE
+     * between its new cumulative allocation and claimedAmount (v5).
      */
     function updateRoot(
         uint256 id,

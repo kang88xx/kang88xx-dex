@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { erc20Abi, parseUnits, parseEventLogs } from "viem";
+import { useMemo, useState } from "react";
+import { erc20Abi, formatUnits, parseUnits, parseEventLogs } from "viem";
 import {
   useAccount,
   usePublicClient,
@@ -69,14 +69,23 @@ const esc = (s: string) =>
  * client-side address search box. Whitelist campaigns expose per-wallet data;
  * others only track an aggregate count.
  */
-function openClaimDetail(c: AirdropCampaign) {
+function openClaimDetail(
+  c: AirdropCampaign,
+  receivedRows?: { address: string; allocated: number; received: number }[],
+) {
   const isWl = c.eligibility === "whitelist";
   const rows = isWl
-    ? c.whitelist.map((w) => ({
-        address: w.address,
-        allocated: w.amount,
-        received: w.claimed ? w.amount : 0,
-        claimed: w.claimed,
+    ? (
+        receivedRows ??
+        c.whitelist.map((w) => ({
+          address: w.address,
+          allocated: w.amount,
+          received: w.claimed ? w.amount : 0,
+        }))
+      ).map((r) => ({
+        ...r,
+        claimed: r.received > 0,
+        full: r.received > 0 && r.received >= r.allocated,
       }))
     : [];
   const totalAlloc = rows.reduce((s, r) => s + r.allocated, 0);
@@ -116,6 +125,7 @@ function openClaimDetail(c: AirdropCampaign) {
   td.empty { text-align: center; color: #6b7384; padding: 40px 12px; }
   .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
   .pill.y { background: rgba(34,197,94,.15); color: #4ade80; }
+  .pill.p { background: rgba(245,158,11,.15); color: #fbbf24; }
   .pill.n { background: #1b2030; color: #8a91a0; }
 </style>
 </head>
@@ -146,9 +156,11 @@ function openClaimDetail(c: AirdropCampaign) {
       return;
     }
     body.innerHTML = list.map(function (r) {
-      var pill = r.claimed
+      var pill = r.full
         ? '<span class="pill y">받음</span>'
-        : '<span class="pill n">대기</span>';
+        : r.claimed
+          ? '<span class="pill p">부분</span>'
+          : '<span class="pill n">대기</span>';
       return "<tr><td class='addr'>" + r.address +
         "</td><td class='num'>" + fmt(r.allocated) + " " + SYM +
         "</td><td class='num'>" + fmt(r.received) + " " + SYM +
@@ -165,6 +177,71 @@ function openClaimDetail(c: AirdropCampaign) {
   const url = URL.createObjectURL(blob);
   window.open(url, "_blank", "noopener,noreferrer");
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+interface WlClaimStatus {
+  /** lowercased wallet → tokens already received (token units). */
+  received: Record<string, number>;
+  /** Contract exposes per-wallet claimed amounts (v5+) → top-ups claimable. */
+  supportsPartial: boolean;
+  loaded: boolean;
+}
+
+const NO_WL: AirdropCampaign["whitelist"] = [];
+
+/**
+ * On-chain claim status for a launched whitelist campaign — one multicall over
+ * the whole list, so the Received/Pending pills and counters follow the chain
+ * automatically instead of a hand-maintained local flag. Reads the v5
+ * claimedAmount (exact cumulative amount) alongside the v4 boolean hasClaimed;
+ * whichever the deployed contract supports wins.
+ */
+function useWhitelistClaimStatus(c: AirdropCampaign): WlClaimStatus {
+  const launched =
+    c.onchainId != null && airdropLive && c.eligibility === "whitelist";
+  const entries = launched ? c.whitelist : NO_WL;
+  const contract = AIRDROP_CONTRACT as `0x${string}`;
+  const decimals = TOKEN_MAP[c.tokenSymbol]?.decimals ?? 18;
+
+  const { data } = useReadContracts({
+    contracts: entries.flatMap((w) => [
+      {
+        address: contract,
+        abi: AIRDROP_ABI,
+        functionName: "claimedAmount" as const,
+        args: [BigInt(c.onchainId ?? 0), w.address as `0x${string}`] as const,
+        chainId: CHAIN_ID,
+      },
+      {
+        address: contract,
+        abi: AIRDROP_ABI,
+        functionName: "hasClaimed" as const,
+        args: [BigInt(c.onchainId ?? 0), w.address as `0x${string}`] as const,
+        chainId: CHAIN_ID,
+      },
+    ]),
+    query: { enabled: entries.length > 0, refetchInterval: 15_000 },
+  });
+
+  return useMemo(() => {
+    const received: Record<string, number> = {};
+    let supportsPartial = false;
+    entries.forEach((w, i) => {
+      const amt = data?.[i * 2];
+      const flag = data?.[i * 2 + 1];
+      if (amt?.status === "success") {
+        supportsPartial = true;
+        received[w.address.toLowerCase()] = Number(
+          formatUnits(amt.result as bigint, decimals),
+        );
+      } else if (flag?.status === "success") {
+        received[w.address.toLowerCase()] = (flag.result as boolean)
+          ? w.amount
+          : 0;
+      }
+    });
+    return { received, supportsPartial, loaded: data != null };
+  }, [data, entries, decimals]);
 }
 
 /** Server-verified admin session (HTTP-only cookie, see /api/admin/*) */
@@ -1102,6 +1179,10 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
       : undefined;
   const isActive = launched ? (onchainActive ?? c.active) : c.active;
 
+  // Per-wallet claim state straight from the chain (launched whitelist
+  // campaigns) — pills/counters update automatically as wallets claim.
+  const wlStatus = useWhitelistClaimStatus(c);
+
   const requireWallet = (): boolean => {
     if (!wallet || !publicClient) {
       toast.error("지갑을 연결하세요");
@@ -1179,12 +1260,42 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
   };
 
   // Whitelist campaigns track claims per-wallet; others use the flat counter.
+  // Launched campaigns derive everything from the chain; drafts fall back to
+  // the local hand-toggled flags.
   const isWl = c.eligibility === "whitelist";
-  const wlClaimed = c.whitelist.filter((w) => w.claimed);
-  const claimsCount = isWl ? wlClaimed.length : c.claimedCount;
-  const claimedAlloc = isWl
-    ? wlClaimed.reduce((sum, w) => sum + w.amount, 0)
-    : c.claimedCount * c.amountPerClaim;
+  const receivedRows = c.whitelist.map((w) => ({
+    address: w.address,
+    allocated: w.amount,
+    received:
+      launched && wlStatus.loaded
+        ? (wlStatus.received[w.address.toLowerCase()] ?? 0)
+        : w.claimed
+          ? w.amount
+          : 0,
+  }));
+  let claimsCount: number;
+  let claimedAlloc: number;
+  if (isWl) {
+    claimsCount = receivedRows.filter((r) => r.received > 0).length;
+    claimedAlloc = receivedRows.reduce((sum, r) => sum + r.received, 0);
+  } else if (launched && onchainRow) {
+    // Public launched: claimed total / per-claim straight from the chain row.
+    const row = onchainRow as readonly [
+      string,
+      string,
+      bigint,
+      bigint,
+      bigint,
+      bigint,
+      boolean,
+    ];
+    const dec = TOKEN_MAP[c.tokenSymbol]?.decimals ?? 18;
+    claimedAlloc = Number(formatUnits(row[3], dec));
+    claimsCount = row[4] > 0n ? Number(row[3] / row[4]) : c.claimedCount;
+  } else {
+    claimsCount = c.claimedCount;
+    claimedAlloc = c.claimedCount * c.amountPerClaim;
+  }
 
   return (
     <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5">
@@ -1215,7 +1326,7 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => openClaimDetail(c)}
+            onClick={() => openClaimDetail(c, isWl ? receivedRows : undefined)}
             title="클레임 내역 보기"
             className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] px-2.5 py-1 text-[11px] font-medium text-[var(--muted)] transition-colors hover:bg-[var(--surface)] hover:text-[var(--foreground)]"
           >
@@ -1268,7 +1379,9 @@ function CampaignAdminRow({ campaign: c }: { campaign: AirdropCampaign }) {
         />
       </div>
 
-      {c.eligibility === "whitelist" && <WhitelistManager campaign={c} />}
+      {c.eligibility === "whitelist" && (
+        <WhitelistManager campaign={c} claimStatus={wlStatus} />
+      )}
       {c.eligibility === "public" && <PublicLaunchPanel campaign={c} />}
 
       <DeleteConfirmModal
@@ -1554,7 +1667,13 @@ function parseBulk(text: string, defaultAmount: number): ParsedRow[] {
     });
 }
 
-function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
+function WhitelistManager({
+  campaign: c,
+  claimStatus,
+}: {
+  campaign: AirdropCampaign;
+  claimStatus: WlClaimStatus;
+}) {
   const address = useDexStore((s) => s.address);
   const addManyToWhitelist = useDexStore((s) => s.addManyToWhitelist);
   const removeFromWhitelist = useDexStore((s) => s.removeFromWhitelist);
@@ -1581,6 +1700,17 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
   const apply = () => {
     if (valid.length === 0)
       return toast.error("No valid rows to apply");
+    // v4 contracts can never pay a top-up to a wallet that already claimed
+    // (hasClaimed is permanent) — surface that before the admin funds it.
+    if (launched && !claimStatus.supportsPartial) {
+      const dup = valid.filter(
+        (r) => (claimStatus.received[r.address!] ?? 0) > 0,
+      );
+      if (dup.length > 0)
+        toast.error(
+          `이미 수령한 지갑 ${dup.length}개 포함 — 현재 컨트랙트(v4)에서는 증액분 재클레임이 불가합니다`,
+        );
+    }
     addManyToWhitelist(
       c.id,
       valid.map((r) => ({ address: r.address!, amount: r.amount! })),
@@ -1607,6 +1737,19 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
       return toast.error(`${c.tokenSymbol}는 토큰 컨트랙트가 없습니다`);
     if (c.whitelist.length === 0)
       return toast.error("화이트리스트가 비어 있습니다");
+    // Block funding top-ups that v4 can never pay out: a claimed wallet's
+    // grown allocation is unreachable behind the permanent hasClaimed flag,
+    // so the delta would sit stranded in the contract until sweep.
+    if (!claimStatus.supportsPartial) {
+      const stranded = c.whitelist.filter((w) => {
+        const got = claimStatus.received[w.address.toLowerCase()] ?? 0;
+        return got > 0 && w.amount > got;
+      });
+      if (stranded.length > 0)
+        return toast.error(
+          `이미 수령한 지갑 ${stranded.length}개에 증액분이 있습니다 — v4 컨트랙트는 재클레임 불가, v5 재배포 후 갱신하세요`,
+        );
+    }
     try {
       setSyncing(true);
       const decimals = rewardToken.decimals;
@@ -1938,47 +2081,78 @@ function WhitelistManager({ campaign: c }: { campaign: AirdropCampaign }) {
         </div>
       </div>
 
-      {/* Entries: per-wallet amount + received toggle */}
+      {/* Entries: per-wallet amount + claim state. Launched campaigns show the
+          on-chain claim status (auto-synced); drafts keep the manual toggle. */}
       {c.whitelist.length > 0 && (
         <div className="mt-3 space-y-1.5">
-          {c.whitelist.map((w) => (
-            <div
-              key={w.address}
-              className="flex items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs"
-            >
-              <span className="font-mono">{shortAddress(w.address)}</span>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold tabular-nums">
-                  {w.amount.toLocaleString()} {c.tokenSymbol}
-                </span>
-                <button
-                  onClick={() =>
-                    setWhitelistClaimed(c.id, w.address, !w.claimed)
-                  }
-                  title={
-                    w.claimed ? "Mark as not received" : "Mark as received"
-                  }
-                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
-                    w.claimed
-                      ? "bg-[var(--up-soft)] text-[var(--up)]"
-                      : "bg-[var(--surface-2)] text-[var(--muted)] hover:text-[var(--foreground)]"
-                  }`}
-                >
-                  {w.claimed && <Check className="h-3 w-3" />}
-                  {w.claimed ? "Received" : "Pending"}
-                </button>
-                {!launched && (
-                  <button
-                    onClick={() => removeFromWhitelist(c.id, w.address)}
-                    className="text-[var(--muted)] hover:text-[var(--down)]"
-                    title="Remove"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
+          {c.whitelist.map((w) => {
+            const received =
+              launched && claimStatus.loaded
+                ? (claimStatus.received[w.address.toLowerCase()] ?? 0)
+                : w.claimed
+                  ? w.amount
+                  : 0;
+            const full = received > 0 && received >= w.amount;
+            const partial = received > 0 && !full;
+            return (
+              <div
+                key={w.address}
+                className="flex items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs"
+              >
+                <span className="font-mono">{shortAddress(w.address)}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold tabular-nums">
+                    {w.amount.toLocaleString()} {c.tokenSymbol}
+                  </span>
+                  {launched ? (
+                    <span
+                      title="온체인 클레임 상태 (자동 동기화)"
+                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        full
+                          ? "bg-[var(--up-soft)] text-[var(--up)]"
+                          : partial
+                            ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+                            : "bg-[var(--surface-2)] text-[var(--muted)]"
+                      }`}
+                    >
+                      {full && <Check className="h-3 w-3" />}
+                      {full
+                        ? "Received"
+                        : partial
+                          ? `부분 ${received.toLocaleString()}`
+                          : "Pending"}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() =>
+                        setWhitelistClaimed(c.id, w.address, !w.claimed)
+                      }
+                      title={
+                        w.claimed ? "Mark as not received" : "Mark as received"
+                      }
+                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                        w.claimed
+                          ? "bg-[var(--up-soft)] text-[var(--up)]"
+                          : "bg-[var(--surface-2)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                      }`}
+                    >
+                      {w.claimed && <Check className="h-3 w-3" />}
+                      {w.claimed ? "Received" : "Pending"}
+                    </button>
+                  )}
+                  {!launched && (
+                    <button
+                      onClick={() => removeFromWhitelist(c.id, w.address)}
+                      className="text-[var(--muted)] hover:text-[var(--down)]"
+                      title="Remove"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

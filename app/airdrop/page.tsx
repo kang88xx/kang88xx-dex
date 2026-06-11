@@ -125,6 +125,16 @@ function OnchainCampaignCard({
     chainId: CHAIN_ID,
     query: { enabled: !!wallet },
   });
+  // Cumulative claimed amount — v5 contracts only. On a v4 contract this read
+  // fails and the boolean above decides (partial claims don't exist there).
+  const { data: claimedAmtOnchain } = useReadContract({
+    address: AIRDROP_CONTRACT as `0x${string}`,
+    abi: AIRDROP_ABI,
+    functionName: "claimedAmount",
+    args: wallet ? [BigInt(c.onchainId), wallet] : undefined,
+    chainId: CHAIN_ID,
+    query: { enabled: !!wallet },
+  });
 
   const token = TOKEN_MAP[c.tokenSymbol];
   const ended = c.endsAtMs !== 0 && isPast(c.endsAtMs);
@@ -132,7 +142,6 @@ function OnchainCampaignCard({
   const soldOut = c.isPublic
     ? remainingWei < c.amountPerClaimWei
     : remainingWei <= 0n;
-  const alreadyClaimed = !!claimedOnchain;
   const progress =
     c.funded > 0 ? Math.min(100, (c.claimed / c.funded) * 100) : 0;
 
@@ -166,6 +175,30 @@ function OnchainCampaignCard({
     : myAlloc
       ? Number(formatUnits(BigInt(myAlloc.amountWei), dec))
       : 0;
+
+  const myAllocWei = myAlloc ? BigInt(myAlloc.amountWei) : 0n;
+  // Tokens this wallet already pulled out. v5 reports the exact cumulative
+  // amount; v4 only has the boolean, which there always means the full
+  // allocation (partial claims don't exist on v4).
+  const walletClaimedWei =
+    claimedAmtOnchain != null
+      ? claimedAmtOnchain
+      : claimedOnchain
+        ? c.isPublic
+          ? c.amountPerClaimWei
+          : myAllocWei
+        : 0n;
+  // Whitelist allocations are cumulative — when the admin grows a wallet's
+  // amount after it claimed, the difference becomes claimable again (v5).
+  const remainingAllocWei =
+    myAllocWei > walletClaimedWei ? myAllocWei - walletClaimedWei : 0n;
+  const alreadyClaimed = c.isPublic
+    ? walletClaimedWei > 0n
+    : walletClaimedWei > 0n && remainingAllocWei === 0n;
+  /** What the next claim tx actually pays out. */
+  const claimableNow = c.isPublic
+    ? c.amountPerClaim
+    : Number(formatUnits(remainingAllocWei, dec));
 
   let eligible = true;
   let reason = "";
@@ -210,7 +243,7 @@ function OnchainCampaignCard({
       if (receipt.status !== "success") return toast.error("클레임 실패");
       recordClaim(c.onchainId.toString());
       toast.success(
-        `${claimAmount.toLocaleString()} ${c.tokenSymbol} 클레임 완료!`,
+        `${claimableNow.toLocaleString()} ${c.tokenSymbol} 클레임 완료!`,
       );
       // Refresh hasClaimed + on-chain campaign state.
       queryClient.invalidateQueries();
@@ -221,7 +254,12 @@ function OnchainCampaignCard({
     }
   };
 
-  const canClaim = eligible && !ended && !soldOut && !alreadyClaimed;
+  const canClaim =
+    eligible &&
+    !ended &&
+    !soldOut &&
+    !alreadyClaimed &&
+    (c.isPublic || remainingAllocWei > 0n);
 
   return (
     <div className="flex flex-col rounded-3xl border border-[var(--border)] bg-[var(--card)] p-6">
@@ -287,6 +325,16 @@ function OnchainCampaignCard({
         </div>
       )}
 
+      {/* Allocation grew after a claim — the difference is claimable (v5). */}
+      {!c.isPublic && walletClaimedWei > 0n && remainingAllocWei > 0n && (
+        <div className="mt-4 flex items-center gap-2 rounded-xl bg-[var(--up-soft)] px-3 py-2 text-xs text-[var(--up)]">
+          <Check className="h-3.5 w-3.5" />
+          이미 {Number(formatUnits(walletClaimedWei, dec)).toLocaleString()}{" "}
+          {c.tokenSymbol} 수령 — 추가 {claimableNow.toLocaleString()}{" "}
+          {c.tokenSymbol} 클레임 가능
+        </div>
+      )}
+
       <div className="mt-auto pt-5">
         {!connected ? (
           <button
@@ -312,7 +360,7 @@ function OnchainCampaignCard({
             {claiming && <Loader2 className="h-5 w-5 animate-spin" />}
             {claiming
               ? "Claiming…"
-              : `Claim ${claimAmount.toLocaleString()} ${c.tokenSymbol}`}
+              : `Claim ${claimableNow.toLocaleString()} ${c.tokenSymbol}`}
           </button>
         ) : (
           <button

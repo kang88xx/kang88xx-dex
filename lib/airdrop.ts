@@ -101,6 +101,19 @@ export const AIRDROP_ABI = [
     outputs: [{ name: "", type: "bool" }],
   },
   {
+    // v5 contracts only — cumulative tokens already claimed per wallet.
+    // Reverts (read fails) on the v4 contract; callers must fall back to
+    // the boolean hasClaimed above.
+    type: "function",
+    name: "claimedAmount",
+    stateMutability: "view",
+    inputs: [
+      { name: "", type: "uint256" },
+      { name: "", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
     type: "function",
     name: "owner",
     stateMutability: "view",
