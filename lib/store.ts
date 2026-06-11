@@ -557,7 +557,10 @@ export const useDexStore = create<DexState>()(
       // v8: admin-managed swap token registry (adminTokens / disabledTokens)
       // v9: admin-managed liquidity pools (real pools only)
       name: "ioi-dex-store",
-      version: 10, // v10: whitelist entries gained per-wallet amount + claimed
+      // v10: whitelist entries gained per-wallet amount + claimed
+      // v11: airdrop contract redeployed (v4) — old onchainIds point at the
+      //      abandoned v2 contract, so launched campaigns revert to drafts
+      version: 11,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) =>
         Object.fromEntries(
@@ -565,13 +568,31 @@ export const useDexStore = create<DexState>()(
             ([k]) => !["connected", "address"].includes(k),
           ),
         ) as DexState,
-      migrate: (persisted) => {
+      migrate: (persisted, version) => {
         const p = persisted as Record<string, unknown>;
         delete p.connected;
         delete p.address;
         delete p.balances;
-        // reseed campaigns — old ones reference pre-BSC tokens/pools
-        delete p.campaigns;
+        if (version < 10) {
+          // reseed campaigns — old ones reference pre-BSC tokens/pools
+          delete p.campaigns;
+          return p as unknown as DexState;
+        }
+        // v10 → v11: keep campaign names/whitelists but strip launch state
+        // (onchainId, claim marks) so they can launch fresh on the new
+        // contract. Stale per-wallet claim records go too.
+        if (Array.isArray(p.campaigns)) {
+          p.campaigns = (p.campaigns as AirdropCampaign[]).map((c) => ({
+            ...c,
+            onchainId: undefined,
+            claimedCount: 0,
+            whitelist: (c.whitelist ?? []).map((w) => ({
+              ...w,
+              claimed: false,
+            })),
+          }));
+        }
+        p.claims = {};
         return p as unknown as DexState;
       },
     },
