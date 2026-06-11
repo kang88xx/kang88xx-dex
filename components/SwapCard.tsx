@@ -217,7 +217,7 @@ export function SwapCard() {
           fetch("/api/analytics", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ event: "swap", volumeUsd, pair }),
+            body: JSON.stringify({ event: "swap", volumeUsd, pair, txHash: hash }),
           }).catch(() => {});
         }
         setAmount("");

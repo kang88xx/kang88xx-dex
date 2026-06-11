@@ -12,9 +12,13 @@ import {
 export const dynamic = "force-dynamic";
 
 function clientIp(req: Request): string {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local"
-  );
+  // x-real-ip is set by the platform (Vercel) and can't be spoofed by the
+  // client. Fall back to the LAST x-forwarded-for entry — proxies append the
+  // real peer IP, so the first entry is client-controlled but the last isn't.
+  const real = req.headers.get("x-real-ip")?.trim();
+  if (real) return real;
+  const fwd = req.headers.get("x-forwarded-for")?.split(",") ?? [];
+  return fwd.at(-1)?.trim() || "local";
 }
 
 export async function POST(req: Request) {

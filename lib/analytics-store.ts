@@ -38,6 +38,8 @@ interface Data {
   connectionLog: ConnectionLog[];
   // Rolling log of swaps (pruned to the last 24h) for per-pool Fee APR.
   swapLog: SwapLog[];
+  // Tx hashes already counted toward volume (replay guard), hash → unix ms.
+  seenSwapTxs: Record<string, number>;
 }
 
 function empty(): Data {
@@ -48,6 +50,7 @@ function empty(): Data {
     seenWallets: [],
     connectionLog: [],
     swapLog: [],
+    seenSwapTxs: {},
   };
 }
 
@@ -109,9 +112,29 @@ export function visitorDays(): { date: string; count: number }[] {
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
-export function recordVolume(usd: number, pair?: string, now = Date.now()): void {
-  if (!Number.isFinite(usd) || usd <= 0) return;
+const TX_DEDUPE_MS = 7 * DAY_MS;
+
+/**
+ * Records swap volume once per tx hash. Returns false (and records nothing)
+ * when the hash was already counted — the on-chain replay guard.
+ */
+export function recordVolume(
+  usd: number,
+  txHash: string,
+  pair?: string,
+  now = Date.now(),
+): boolean {
+  if (!Number.isFinite(usd) || usd <= 0) return false;
   const d = load();
+  const hash = txHash.toLowerCase();
+  const seen = d.seenSwapTxs ?? {};
+  // Prune old hashes so the guard set stays bounded.
+  for (const [h, ts] of Object.entries(seen)) {
+    if (now - ts >= TX_DEDUPE_MS) delete seen[h];
+  }
+  if (seen[hash] !== undefined) return false;
+  seen[hash] = now;
+  d.seenSwapTxs = seen;
   const k = kstDayKey(now);
   d.volumeByDay[k] = (d.volumeByDay[k] ?? 0) + usd;
   if (pair) {
@@ -120,6 +143,7 @@ export function recordVolume(usd: number, pair?: string, now = Date.now()): void
     d.swapLog.push({ pair, usd, ts: now });
   }
   save(d);
+  return true;
 }
 
 /** Rolling 24h swap volume (USD) per token-pair key, e.g. { "BNB-USDT": 1234 }. */

@@ -14,8 +14,19 @@ export function adminConfigured(): boolean {
   return !!process.env.ADMIN_PASSWORD && !!secret();
 }
 
+/**
+ * Session-signing key derived from BOTH the session secret and the admin
+ * password. Rotating either env var (then redeploying) invalidates every
+ * outstanding session at once — the revocation story for stateless tokens.
+ */
+function signingKey(): Buffer {
+  return createHmac("sha256", secret())
+    .update(`session-key|${process.env.ADMIN_PASSWORD ?? ""}`)
+    .digest();
+}
+
 function sign(payload: string): string {
-  return createHmac("sha256", secret()).update(payload).digest("hex");
+  return createHmac("sha256", signingKey()).update(payload).digest("hex");
 }
 
 /** Constant-time string comparison via SHA-256 digests (equal length). */
