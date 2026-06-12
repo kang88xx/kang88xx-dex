@@ -78,7 +78,8 @@ export type TxType =
   | "add-liquidity"
   | "remove-liquidity"
   | "claim"
-  | "bet";
+  | "bet"
+  | "bridge";
 
 export interface Transaction {
   id: string;

@@ -32,6 +32,7 @@ const TX_ICON: Record<TxType, React.ReactNode> = {
   "remove-liquidity": <MinusCircle className="h-4 w-4" />,
   claim: <Gift className="h-4 w-4" />,
   bet: <Coins className="h-4 w-4" />,
+  bridge: <ArrowLeftRight className="h-4 w-4" />,
 };
 
 export default function PortfolioPage() {

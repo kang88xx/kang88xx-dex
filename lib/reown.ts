@@ -1,7 +1,8 @@
 import { cookieStorage, createStorage } from "@wagmi/core";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
+import { opBNBTestnet } from "@reown/appkit/networks";
 import type { AppKitNetwork } from "@reown/appkit/networks";
-import { ACTIVE_CHAIN } from "./chain";
+import { ACTIVE_CHAIN, IS_TESTNET } from "./chain";
 
 // Get one at https://dashboard.reown.com → set in .env.local
 export const projectId =
@@ -16,8 +17,11 @@ if (!projectId && typeof window !== "undefined") {
 }
 
 // Active BNB chain (testnet or mainnet) — driven by NEXT_PUBLIC_CHAIN_ENV.
-// Append more chains here to expand (e.g. arbitrum).
-export const networks: [AppKitNetwork, ...AppKitNetwork[]] = [ACTIVE_CHAIN];
+// On testnet, opBNB Testnet rides along as the USDT bridge counterpart so
+// the wallet can switch chains on /bridge. Append more chains to expand.
+export const networks: [AppKitNetwork, ...AppKitNetwork[]] = IS_TESTNET
+  ? [ACTIVE_CHAIN, opBNBTestnet]
+  : [ACTIVE_CHAIN];
 
 export const wagmiAdapter = new WagmiAdapter({
   storage: createStorage({ storage: cookieStorage }),

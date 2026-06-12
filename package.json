@@ -12,7 +12,10 @@
     "deploy:airdrop": "node scripts/deploy-airdrop.mjs",
     "test:merkle": "node scripts/test-merkle.mjs",
     "compile:lms": "node scripts/compile-contract.mjs KangLMS",
-    "deploy:lms": "node scripts/deploy-lms.mjs"
+    "deploy:lms": "node scripts/deploy-lms.mjs",
+    "compile:bridge": "node scripts/compile-contract.mjs TestBridge",
+    "fund:opbnb": "node scripts/fund-opbnb.mjs",
+    "deploy:bridge": "node scripts/deploy-bridge.mjs"
   },
   "dependencies": {
     "@openzeppelin/merkle-tree": "^1.0.8",
