@@ -25,9 +25,8 @@ export const TOKENS: Token[] = [
     change24h: 0,
     volume24h: 1_000_000,
     marketCap: 77_000_000,
-    color: "#7c3aed",
+    color: "#000000", // black circle behind the mark
     logoUrl: "/tokens/XP.svg",
-    logoTransparent: true,
     logoScale: 0.8, // icon runs large — shrink 20% so corners aren't clipped
   },
   {
@@ -58,7 +57,9 @@ export const TOKENS: Token[] = [
     change24h: 0,
     volume24h: 0,
     marketCap: 0,
-    color: "#c2a633",
+    color: "#000000", // black circle behind the pumpkin mark
+    logoUrl: "/tokens/KDG.png",
+    logoScale: 0.72, // keep the pumpkin clear of the circle's edge
   },
 ];
 
