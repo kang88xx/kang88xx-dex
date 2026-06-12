@@ -69,8 +69,16 @@ contract KangLMS {
     mapping(uint256 => Round) public rounds;
     mapping(uint256 => mapping(address => bool)) public hasParticipated;
 
-    /// Prize/refund owed per address — withdraw via claim() (pull-payment).
-    mapping(address => uint256) public pendingPrize;
+    /// A win/refund credited to an address, kept PER ROUND so prizes never
+    /// merge into a single lump: claim them individually (claimRound) or all
+    /// at once (claimAll). `amount` is the remaining unclaimed amount.
+    struct Win {
+        uint256 roundId;
+        uint256 amount;
+        bool claimed;
+        bool isRefund;
+    }
+    mapping(address => Win[]) private _wins;
     uint256 public totalPendingPrize;
 
     bool private _locked;
@@ -91,7 +99,7 @@ contract KangLMS {
         uint256 amount,
         bool isRefund
     );
-    event PrizeClaimed(address indexed recipient, uint256 amount);
+    event PrizeClaimed(address indexed recipient, uint256 indexed roundId, uint256 amount);
     event ConfigUpdated(string param);
     event PausedSet(bool isPaused);
     event TokenWithdrawn(address indexed to, uint256 amount);
@@ -141,7 +149,7 @@ contract KangLMS {
         bool hasWinner = r.uniquePlayers >= 2 && recipient != address(0);
 
         if (recipient != address(0) && amount > 0) {
-            pendingPrize[recipient] += amount;
+            _wins[recipient].push(Win(currentRoundId, amount, false, !hasWinner));
             totalPendingPrize += amount;
             emit PrizeCredited(currentRoundId, recipient, amount, !hasWinner);
         }
@@ -212,25 +220,76 @@ contract KangLMS {
     }
 
     /**
-     * Withdraw everything credited to the caller. If the current round just
-     * expired, it is settled first — so the winner claims their fresh pot in
-     * ONE tx (and the next round opens). Deliberately NOT gated by `paused`
-     * — a winner can always claim. Balance-capped: any shortfall stays
-     * claimable later instead of reverting.
+     * Claim ONE winning round by its id. Settles the current round first, so a
+     * just-won pot is claimable in the same tx (its record is created here,
+     * then paid). Not gated by `paused` — a winner can always claim.
+     * Balance-capped: a shortfall stays claimable later instead of reverting.
      */
-    function claim() external nonReentrant {
+    function claimRound(uint256 roundId) external nonReentrant {
         _settleExpired();
-        uint256 owed = pendingPrize[msg.sender];
-        require(owed > 0, "nothing to claim");
-
+        Win[] storage list = _wins[msg.sender];
         uint256 available = token.balanceOf(address(this));
-        uint256 pay = owed > available ? available : owed;
-        require(pay > 0, "no contract balance");
+        require(available > 0, "no contract balance");
+        for (uint256 i = 0; i < list.length; i++) {
+            Win storage w = list[i];
+            if (w.roundId == roundId && !w.claimed && w.amount > 0) {
+                uint256 pay = w.amount > available ? available : w.amount;
+                w.amount -= pay;
+                if (w.amount == 0) w.claimed = true;
+                totalPendingPrize -= pay;
+                require(token.transfer(msg.sender, pay), "transfer failed");
+                emit PrizeClaimed(msg.sender, roundId, pay);
+                return;
+            }
+        }
+        revert("nothing to claim");
+    }
 
-        pendingPrize[msg.sender] = owed - pay;
-        totalPendingPrize -= pay;
-        require(token.transfer(msg.sender, pay), "transfer failed");
-        emit PrizeClaimed(msg.sender, pay);
+    /**
+     * Claim EVERY unclaimed win/refund in one tx (a single transfer). Settles
+     * first so a just-won pot is included. Balance-capped per round: any
+     * shortfall stays claimable later.
+     */
+    function claimAll() external nonReentrant {
+        _settleExpired();
+        Win[] storage list = _wins[msg.sender];
+        uint256 available = token.balanceOf(address(this));
+        require(available > 0, "no contract balance");
+        uint256 totalPaid;
+        for (uint256 i = 0; i < list.length; i++) {
+            if (available == 0) break;
+            Win storage w = list[i];
+            if (w.claimed || w.amount == 0) continue;
+            uint256 pay = w.amount > available ? available : w.amount;
+            w.amount -= pay;
+            if (w.amount == 0) w.claimed = true;
+            available -= pay;
+            totalPaid += pay;
+            emit PrizeClaimed(msg.sender, w.roundId, pay);
+        }
+        require(totalPaid > 0, "nothing to claim");
+        totalPendingPrize -= totalPaid;
+        require(token.transfer(msg.sender, totalPaid), "transfer failed");
+    }
+
+    // ---------- Prize views ----------
+
+    /// Total still unclaimed across all of `who`'s rounds.
+    function pendingPrize(address who) external view returns (uint256 total) {
+        Win[] storage list = _wins[who];
+        for (uint256 i = 0; i < list.length; i++) {
+            if (!list[i].claimed) total += list[i].amount;
+        }
+    }
+
+    /// Number of win records (claimed or not) held for `who`.
+    function winCount(address who) external view returns (uint256) {
+        return _wins[who].length;
+    }
+
+    /// All of `who`'s win records — filter client-side for unclaimed (amount > 0).
+    function winsOf(address who) external view returns (Win[] memory) {
+        return _wins[who];
     }
 
     // ---------- Owner ----------

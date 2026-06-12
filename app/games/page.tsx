@@ -567,7 +567,8 @@ function OnchainGame() {
 
   const [amount, setAmount] = useState("100");
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [busy, setBusy] = useState<"bet" | "claim" | null>(null);
+  // "bet" | "claim-all" | `claim:${roundId}` | null
+  const [busy, setBusy] = useState<string | null>(null);
 
   const contract = LMS_CONTRACT as `0x${string}`;
   const dec = TOKEN_MAP.KANG?.decimals ?? 18;
@@ -586,6 +587,15 @@ function OnchainGame() {
     address: contract,
     abi: LMS_ABI,
     functionName: "pendingPrize",
+    args: wallet ? [wallet] : undefined,
+    chainId: CHAIN_ID,
+    query: { enabled: !!wallet, refetchInterval: 10_000 },
+  });
+  // Per-round win records — each is claimable on its own (claimRound).
+  const { data: winsData } = useReadContract({
+    address: contract,
+    abi: LMS_ABI,
+    functionName: "winsOf",
     args: wallet ? [wallet] : undefined,
     chainId: CHAIN_ID,
     query: { enabled: !!wallet, refetchInterval: 10_000 },
@@ -647,6 +657,32 @@ function OnchainGame() {
       ? prizePool
       : 0;
   const claimable = pending + unsettledWin;
+
+  // The just-won pot isn't settled on-chain yet, so it has no win record —
+  // surface it as a synthetic row (claimRound settles it first, then pays).
+  const justWonRoundId = unsettledWin > 0 && round ? round.id : null;
+
+  // Per-round prize rows: synthetic just-won pot + each unclaimed win record.
+  // Newest round first. Small list — recomputed each render (no memo needed).
+  const prizeRows: { roundId: number; amount: number; isRefund: boolean }[] = [];
+  if (justWonRoundId != null)
+    prizeRows.push({ roundId: justWonRoundId, amount: unsettledWin, isRefund: false });
+  for (const w of (winsData ?? []) as readonly {
+    roundId: bigint;
+    amount: bigint;
+    claimed: boolean;
+    isRefund: boolean;
+  }[]) {
+    if (w.claimed || w.amount === 0n) continue;
+    const roundId = Number(w.roundId);
+    if (prizeRows.some((r) => r.roundId === roundId)) continue; // dedupe synthetic
+    prizeRows.push({
+      roundId,
+      amount: Number(formatUnits(w.amount, dec)),
+      isRefund: w.isRefund,
+    });
+  }
+  prizeRows.sort((a, b) => b.roundId - a.roundId);
 
   // An expired round isn't settled on-chain until the next bet/claim, but we
   // present the board as the NEXT round already waiting — so the game never
@@ -778,20 +814,45 @@ function OnchainGame() {
     }
   };
 
-  const doClaim = async () => {
+  // Claim a single winning round.
+  const doClaimRound = async (roundId: number, amount: number) => {
     if (!requireWallet()) return;
     try {
-      setBusy("claim");
-      toast.info("상금 수령 트랜잭션을 지갑에서 승인하세요");
+      setBusy(`claim:${roundId}`);
+      toast.info(`라운드 #${roundId} 상금 수령을 지갑에서 승인하세요`);
       const hash = await writeContractAsync({
         address: contract,
         abi: LMS_ABI,
-        functionName: "claim",
+        functionName: "claimRound",
+        args: [BigInt(roundId)],
         chainId: CHAIN_ID,
       });
       const receipt = await publicClient!.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") return toast.error("수령 실패");
-      toast.success(`${claimable.toLocaleString()} KANG 수령 완료!`);
+      toast.success(`라운드 #${roundId} · ${amount.toLocaleString()} KANG 수령 완료!`);
+      refreshAll();
+    } catch {
+      toast.error("수령 실패 — 지갑에서 거부되었거나 수령할 금액이 없습니다");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Claim every unclaimed round in one tx.
+  const doClaimAll = async () => {
+    if (!requireWallet()) return;
+    try {
+      setBusy("claim-all");
+      toast.info("전체 상금 수령 트랜잭션을 지갑에서 승인하세요");
+      const hash = await writeContractAsync({
+        address: contract,
+        abi: LMS_ABI,
+        functionName: "claimAll",
+        chainId: CHAIN_ID,
+      });
+      const receipt = await publicClient!.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") return toast.error("수령 실패");
+      toast.success(`${claimable.toLocaleString()} KANG 전체 수령 완료!`);
       refreshAll();
     } catch {
       toast.error("수령 실패 — 지갑에서 거부되었거나 수령할 금액이 없습니다");
@@ -933,27 +994,61 @@ function OnchainGame() {
       <div className="grid gap-5 md:grid-cols-[1fr_340px]">
         {/* Left column: claims card + bet card + fee bar */}
         <div className="flex flex-col gap-5">
-          {/* Pull-payment prize claim — includes a just-won pot (claim() settles it) */}
-          {hydrated && connected && claimable > 0 && (
+          {/* Pull-payment prizes — one row per winning round, each claimable
+              on its own (claimRound). A just-won pot settles when claimed. */}
+          {hydrated && connected && prizeRows.length > 0 && (
             <div className="rounded-3xl border border-[var(--up)]/40 bg-[var(--card)] p-5 sm:p-7 shadow-2xl">
-              <div className="flex items-center gap-2 mb-4">
-                <Trophy className="h-4 w-4 text-[var(--up)]" />
-                <h2 className="text-base font-semibold">Your Prize</h2>
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Trophy className="h-4 w-4 text-[var(--up)]" />
+                  <h2 className="text-base font-semibold">
+                    Your Prizes
+                    <span className="ml-2 text-sm font-normal text-[var(--muted)]">
+                      {formatNumber(claimable, 2)} KANG · {prizeRows.length}
+                      {prizeRows.length > 1 ? " rounds" : " round"}
+                    </span>
+                  </h2>
+                </div>
+                {prizeRows.length > 1 && (
+                  <button
+                    onClick={doClaimAll}
+                    disabled={busy !== null}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--up)]/40 px-3 py-1.5 text-xs font-semibold text-[var(--up)] transition-colors hover:bg-[var(--up-soft)] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {busy === "claim-all" && (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    )}
+                    {busy === "claim-all" ? "수령 중…" : "Claim all"}
+                  </button>
+                )}
               </div>
-              <div className="flex items-center justify-between rounded-2xl bg-[var(--surface)] px-4 py-3">
-                <span className="text-xl font-bold">
-                  {formatNumber(claimable, 2)} KANG
-                </span>
-                <button
-                  onClick={doClaim}
-                  disabled={busy !== null}
-                  className="inline-flex items-center gap-2 rounded-xl bg-[var(--up)] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {busy === "claim" && (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  )}
-                  {busy === "claim" ? "수령 중…" : "Claim"}
-                </button>
+              <div className="space-y-2">
+                {prizeRows.map((row) => (
+                  <div
+                    key={row.roundId}
+                    className="flex items-center justify-between rounded-2xl bg-[var(--surface)] px-4 py-3"
+                  >
+                    <div>
+                      <span className="text-lg font-bold">
+                        {formatNumber(row.amount, 2)} KANG
+                      </span>
+                      <span className="ml-2 text-xs text-[var(--muted)]">
+                        Round #{row.roundId}
+                        {row.isRefund ? " · 환불" : ""}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => doClaimRound(row.roundId, row.amount)}
+                      disabled={busy !== null}
+                      className="inline-flex items-center gap-2 rounded-xl bg-[var(--up)] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {busy === `claim:${row.roundId}` && (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      )}
+                      {busy === `claim:${row.roundId}` ? "수령 중…" : "Claim"}
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           )}

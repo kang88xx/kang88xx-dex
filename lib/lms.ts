@@ -26,12 +26,39 @@ export const LMS_ABI = [
     outputs: [],
   },
   {
-    // Withdraw everything credited to the caller (pull-payment prizes).
+    // Claim one winning round by id (settles a just-won pot first).
     type: "function",
-    name: "claim",
+    name: "claimRound",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "roundId", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    // Claim every unclaimed win/refund in one tx (pull-payment prizes).
+    type: "function",
+    name: "claimAll",
     stateMutability: "nonpayable",
     inputs: [],
     outputs: [],
+  },
+  {
+    // All win records for an address — { roundId, amount, claimed, isRefund }[].
+    type: "function",
+    name: "winsOf",
+    stateMutability: "view",
+    inputs: [{ name: "who", type: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "roundId", type: "uint256" },
+          { name: "amount", type: "uint256" },
+          { name: "claimed", type: "bool" },
+          { name: "isRefund", type: "bool" },
+        ],
+      },
+    ],
   },
   {
     // Live round id + full state in one read.
@@ -103,6 +130,7 @@ export const LMS_ABI = [
     name: "PrizeClaimed",
     inputs: [
       { name: "recipient", type: "address", indexed: true },
+      { name: "roundId", type: "uint256", indexed: true },
       { name: "amount", type: "uint256", indexed: false },
     ],
   },
