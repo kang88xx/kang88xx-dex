@@ -352,9 +352,11 @@ export function SwapCard({
                     <span className="text-sm text-[var(--muted)]">%</span>
                   </div>
                 )}
-                <p className="mt-2 text-xs text-[var(--muted-2)]">
-                  Max {MAX_SLIPPAGE_PCT}%
-                </p>
+                {slippage > 5 && (
+                  <p className="mt-2 text-xs text-[var(--down)]">
+                    높은 슬리피지 — 불리한 가격/MEV에 노출될 수 있어요
+                  </p>
+                )}
               </div>
             </>
           )}

@@ -186,8 +186,13 @@ export function useSwapQuote(
   }, [enabled, data, isLoading, amountInWei, paths, toToken]);
 }
 
-/** Max user-selectable slippage (percent). Guards against negative minOut. */
-export const MAX_SLIPPAGE_PCT = 5;
+/**
+ * Hard math ceiling for slippage (percent) — NOT a UX cap. 100% makes bps =
+ * 10_000, the largest value where (10_000n - bps) stays ≥ 0; anything above
+ * would make minOut negative (unbounded loss). The custom field lets users
+ * enter any value up to this; there is no lower "max" restriction.
+ */
+export const MAX_SLIPPAGE_PCT = 100;
 
 /** amountOutMin after applying slippage (percent, e.g. 0.5) */
 export function applySlippage(amountOutWei: bigint, slippagePct: number): bigint {
