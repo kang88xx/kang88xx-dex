@@ -18,6 +18,7 @@ import { useMarket } from "@/lib/market";
 import { useTokenRegistry, tokenTradable } from "@/lib/token-registry";
 import {
   applySlippage,
+  MAX_SLIPPAGE_PCT,
   PANCAKE_FEE,
   PANCAKE_ROUTER,
   PANCAKE_ROUTER_ABI,
@@ -71,7 +72,9 @@ export function SwapCard({
   };
   const [amount, setAmount] = useState("");
   const [picker, setPicker] = useState<null | "from" | "to">(null);
-  const [slippage, setSlippage] = useState(0.5);
+  const [slippage, setSlippage] = useState(1);
+  const [customSlippage, setCustomSlippage] = useState(false);
+  const [customText, setCustomText] = useState("5");
   const [showSettings, setShowSettings] = useState(false);
 
   // tx lifecycle: an in-flight approve or swap, resolved by its receipt
@@ -167,34 +170,48 @@ export function SwapCard({
     }
   };
 
-  const handleApprove = async () => {
-    if (!fromToken?.address) return;
-    setPendingAction("approve");
-    try {
-      const hash = await writeContractAsync({
-        address: fromToken.address as `0x${string}`,
-        abi: erc20Abi,
-        functionName: "approve",
-        args: [PANCAKE_ROUTER, maxUint256],
-        chainId: BSC_CHAIN_ID,
-      });
-      await settleTx(hash, () => toast.success(`${from} approved for trading`));
-    } catch {
-      toast.error("Approval rejected");
-    } finally {
-      setPendingAction(null);
-    }
-  };
-
+  // One-click trade: approve the input token if needed, then go straight to
+  // the swap in the same flow — no second click. Every early exit surfaces a
+  // toast so a click never silently does nothing.
   const handleSwap = async () => {
-    if (!address || quote.amountOutWei <= 0n || quote.path.length === 0) return;
+    if (!address) return toast.error("지갑을 연결하세요");
+    if (!publicClient) return toast.error("네트워크 연결을 확인하세요");
+    if (quote.noRoute || quote.path.length === 0)
+      return toast.error("이 토큰 쌍의 유동성 경로가 없습니다");
     // W1: never submit a swap whose slippage-adjusted minimum rounds to 0,
     // which would leave the trade with no on-chain output protection.
-    if (minOutWei <= 0n) return;
-    setPendingAction("swap");
+    if (quote.amountOutWei <= 0n || minOutWei <= 0n)
+      return toast.error("견적을 받는 중입니다 — 잠시 후 다시 시도하세요");
+
     const deadline = swapDeadline();
     const summary = `Swapped ${formatNumber(amountNum, 4)} ${from} → ${formatNumber(amountOut, 4)} ${to}`;
+    // Local stage flag: state set inside this async fn won't update the
+    // closure's `pendingAction`, so track the failing step ourselves.
+    let stage: "approve" | "swap" = "swap";
     try {
+      // Step 1 — approve the ERC-20 input for the router (native BNB needs none).
+      if (needsApproval && fromToken?.address) {
+        stage = "approve";
+        setPendingAction("approve");
+        toast.info(`${from} 사용 승인 중… 지갑에서 확인하세요`);
+        const approveHash = await writeContractAsync({
+          address: fromToken.address as `0x${string}`,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [PANCAKE_ROUTER, maxUint256],
+          chainId: BSC_CHAIN_ID,
+        });
+        const aReceipt = await publicClient.waitForTransactionReceipt({
+          hash: approveHash,
+        });
+        if (aReceipt.status !== "success")
+          return toast.error(`${from} 승인 트랜잭션 실패`);
+      }
+
+      // Step 2 — the swap itself.
+      stage = "swap";
+      setPendingAction("swap");
+      toast.info("스왑 트랜잭션 전송 중… 지갑에서 확인하세요");
       let hash: `0x${string}`;
       if (isFromNative) {
         hash = await writeContractAsync({
@@ -239,9 +256,15 @@ export function SwapCard({
         setAmount("");
       });
     } catch {
-      toast.error("Swap rejected");
+      toast.error(
+        stage === "approve"
+          ? "승인이 거부되었거나 실패했습니다"
+          : "스왑이 거부되었거나 실패했습니다",
+      );
     } finally {
       setPendingAction(null);
+      // Refresh the router allowance so the button reflects the new state.
+      queryClient.invalidateQueries();
     }
   };
 
@@ -253,7 +276,8 @@ export function SwapCard({
     untradableSide !== null ||
     quote.noRoute ||
     quote.isLoading || // W3: don't act on a quote that is still resolving
-    (!needsApproval && (quote.amountOutWei <= 0n || minOutWei <= 0n)); // W1
+    quote.amountOutWei <= 0n ||
+    minOutWei <= 0n; // W1: one-click approve+swap always needs a live quote
 
   return (
     <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-2 shadow-xl shadow-black/[0.03]">
@@ -275,12 +299,15 @@ export function SwapCard({
               <div className="animate-fade-in absolute right-0 top-10 z-40 w-64 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-xl">
                 <p className="text-sm font-medium">Slippage tolerance</p>
                 <div className="mt-3 flex gap-2">
-                  {[0.1, 0.5, 1].map((s) => (
+                  {[0.2, 1, 3].map((s) => (
                     <button
                       key={s}
-                      onClick={() => setSlippage(s)}
+                      onClick={() => {
+                        setCustomSlippage(false);
+                        setSlippage(s);
+                      }}
                       className={`flex-1 rounded-xl px-2 py-1.5 text-sm transition-colors ${
-                        slippage === s
+                        !customSlippage && slippage === s
                           ? "bg-[var(--accent)] text-white"
                           : "bg-[var(--surface-2)] text-[var(--muted)]"
                       }`}
@@ -288,7 +315,46 @@ export function SwapCard({
                       {s}%
                     </button>
                   ))}
+                  <button
+                    onClick={() => {
+                      setCustomSlippage(true);
+                      setCustomText("5");
+                      setSlippage(5);
+                    }}
+                    className={`flex-1 rounded-xl px-2 py-1.5 text-sm transition-colors ${
+                      customSlippage
+                        ? "bg-[var(--accent)] text-white"
+                        : "bg-[var(--surface-2)] text-[var(--muted)]"
+                    }`}
+                  >
+                    Custom
+                  </button>
                 </div>
+                {customSlippage && (
+                  <div className="mt-2 flex items-center gap-2 rounded-xl bg-[var(--surface-2)] px-3 py-2">
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      autoFocus
+                      value={customText}
+                      onChange={(e) => {
+                        setCustomText(e.target.value);
+                        const v = parseFloat(e.target.value);
+                        setSlippage(
+                          Number.isFinite(v)
+                            ? Math.min(Math.max(v, 0), MAX_SLIPPAGE_PCT)
+                            : 0,
+                        );
+                      }}
+                      placeholder="0"
+                      className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--muted-2)]"
+                    />
+                    <span className="text-sm text-[var(--muted)]">%</span>
+                  </div>
+                )}
+                <p className="mt-2 text-xs text-[var(--muted-2)]">
+                  Max {MAX_SLIPPAGE_PCT}%
+                </p>
               </div>
             </>
           )}
@@ -403,7 +469,7 @@ export function SwapCard({
         ) : (
           <button
             disabled={swapDisabled}
-            onClick={needsApproval ? handleApprove : handleSwap}
+            onClick={handleSwap}
             className="flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-[var(--accent)] text-base font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--muted-2)]"
           >
             {busy ? (
@@ -422,7 +488,10 @@ export function SwapCard({
             ) : quote.isLoading && quote.amountOutWei === 0n ? (
               "Fetching quote…"
             ) : needsApproval ? (
-              `Approve ${from}`
+              <>
+                Approve &amp; Swap
+                <ArrowChip variant="onAccent" />
+              </>
             ) : (
               <>
                 Swap
