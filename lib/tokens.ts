@@ -41,8 +41,11 @@ export const TOKENS: Token[] = [
     change24h: 0,
     volume24h: 0,
     marketCap: 0,
-    color: "#26a17b",
-    logoUrl: "/tokens/USDT.png", // tether-green mark fits the bridged-USDT stable
+    color: "#000000",
+    // Official USDX badge from the Xphere explorer (api.tamsa.io) — the SVG
+    // carries its own dark circle, so render it transparent at full size.
+    logoUrl: "/tokens/USDX.svg",
+    logoTransparent: true,
   },
   {
     // KDOGE — meme coin from the legacy Xphere deployment. Tradable once a

@@ -7,17 +7,17 @@ import { MarketSection } from "./MarketSection";
 /**
  * Home trading board — the swap card and the market chart/table share one
  * token pair. The chart always shows the swap's RECEIVE (buy) side, and
- * clicking a token in the market table trades it against USDT (USDT itself
- * falls back to the USDT↔XP pair).
+ * clicking a token in the market table trades it against USDX (USDX itself
+ * falls back to the USDX↔XP pair).
  */
 export function TradeBoard() {
-  const [pair, setPair] = useState<SwapPair>({ from: "USDT", to: "XP" });
+  const [pair, setPair] = useState<SwapPair>({ from: "USDX", to: "XP" });
 
   const pickFromTable = (symbol: string) =>
     setPair(
-      symbol === "USDT"
-        ? { from: "XP", to: "USDT" }
-        : { from: "USDT", to: symbol },
+      symbol === "USDX"
+        ? { from: "XP", to: "USDX" }
+        : { from: "USDX", to: symbol },
     );
 
   return (

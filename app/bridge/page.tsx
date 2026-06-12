@@ -36,7 +36,7 @@ export default function BridgePage() {
           <p className="text-sm text-[var(--muted)]">
             {BRIDGE_ENABLED
               ? `Move USDT between ${BRIDGE_SIDES[BRIDGE_CHAIN_IDS[0]].short} and ${BRIDGE_SIDES[BRIDGE_CHAIN_IDS[1]].short}.`
-              : "Move assets across chains into BNB Smart Chain."}
+              : "Move assets across chains into Xphere."}
           </p>
         </div>
       </div>
@@ -54,9 +54,9 @@ export default function BridgePage() {
 // ---------------------------------------------------------------------------
 
 const PREVIEW_ROUTES = [
-  { from: "Ethereum", to: "BNB Chain", token: "USDT", time: "~3 min" },
-  { from: "Arbitrum", to: "BNB Chain", token: "ETH", time: "~5 min" },
-  { from: "Polygon", to: "BNB Chain", token: "USDC", time: "~4 min" },
+  { from: "Ethereum", to: "Xphere", token: "USDT", time: "~3 min" },
+  { from: "Arbitrum", to: "Xphere", token: "ETH", time: "~5 min" },
+  { from: "Polygon", to: "Xphere", token: "USDC", time: "~4 min" },
 ];
 
 function ComingSoon() {
@@ -68,8 +68,8 @@ function ComingSoon() {
             One bridge, every chain.
           </h2>
           <p className="mt-3 max-w-md text-[var(--muted)] leading-relaxed">
-            Bridge tokens from Ethereum, Arbitrum, Polygon and more into BNB
-            Smart Chain in a few clicks — with the best routes and lowest
+            Bridge tokens from Ethereum, BSC, Polygon and more into Xphere
+            in a few clicks — with the best routes and lowest
             fees. We&apos;re putting the finishing touches on it.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">

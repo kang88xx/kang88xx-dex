@@ -91,7 +91,7 @@ export default async function RootLayout({
                 <span className="h-1.5 w-1.5 bg-[var(--dot-yellow)]" />
                 Beta · live swaps
               </span>
-              <span>BNB Smart Chain</span>
+              <span>Xphere Mainnet</span>
             </div>
           </div>
         </footer>
