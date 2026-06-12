@@ -10,7 +10,7 @@
 import "server-only";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { Redis } from "@upstash/redis";
+import { redis } from "./redis";
 
 const DIR = join(process.cwd(), ".data");
 const FILE = join(DIR, "analytics.json");
@@ -24,21 +24,7 @@ export interface ConnectionLog {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TX_DEDUPE_MS = 7 * DAY_MS;
 
-// ---------------------------------------------------------------------------
-// Redis backend (durable, shared). Null when no credentials are configured.
-// ---------------------------------------------------------------------------
-
-function makeRedis(): Redis | null {
-  const url =
-    process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
-  const token =
-    process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
-  if (url && token) return new Redis({ url, token });
-  return null;
-}
-const redis = makeRedis();
-
-// Key namespace.
+// Key namespace. Redis client comes from lib/redis.ts (null → in-memory).
 const K = {
   visitorsByDay: "a:visitorsByDay",
   volumeByDay: "a:volumeByDay",

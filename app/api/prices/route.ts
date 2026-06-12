@@ -4,6 +4,7 @@ import { TOKENS } from "@/lib/tokens";
 import { PANCAKE_FACTORY } from "@/lib/chain";
 import { serverRpc } from "@/lib/server-rpc";
 import { volume24hByPair } from "@/lib/analytics-store";
+import { recordPriceSnapshot, change24h } from "@/lib/price-history";
 import type { MarketData } from "@/lib/types";
 
 // Live prices change constantly — never prerender this route.
@@ -102,10 +103,15 @@ async function applyPoolPrices(out: Record<string, MarketData>): Promise<void> {
           // no totalSupply → leave market cap at 0
         }
 
+        // Hourly snapshot + real 24h change (vs the listing price until a
+        // full day of history exists — standard new-listing behavior).
+        await recordPriceSnapshot(t.symbol, price);
+        const change = await change24h(t.symbol, price);
+
         const pairKey = [t.symbol, "USDT"].sort().join("-");
         out[t.symbol] = {
           priceUsd: price,
-          change24h: 0, // no stored history yet → don't fake a 24h move
+          change24h: change,
           volume24h: vol[pairKey] ?? 0,
           marketCap,
           spark7d: [],
