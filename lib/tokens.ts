@@ -4,11 +4,12 @@ import type { Token } from "./types";
 //  Xphere Mainnet token registry (chainId 20250217)
 //
 //  `priceUsd`/`change24h`/`volume24h`/`marketCap` are SEED values only.
-//  `address: null` = native XP. Nothing on Xphere has a CoinGecko feed:
-//  USDX is treated as the $1 anchor (it's the ecosystem's bridged-USDT
-//  stable), and every other token is priced server-side from its USDX
-//  pool on OUR factory (see /api/prices). Until a token has a USDX pool
-//  it shows $0 — seed one on /pools to give it a price.
+//  `address: null` = native XP. Pricing sources:
+//   • XP — live from CoinGecko (id "xphere"; it's a native L1 coin, no
+//     contract there either)
+//   • USDX — the $1 anchor (the ecosystem's bridged-USDT stable)
+//   • everything else — priced server-side from its USDX pool on OUR
+//     factory (see /api/prices); $0 until a USDX pool is seeded on /pools
 //
 //  Add new tokens here (or via the admin panel) as they are deployed.
 // ------------------------------------------------------------------
@@ -17,13 +18,13 @@ export const TOKENS: Token[] = [
   {
     symbol: "XP",
     name: "Xphere",
-    address: null, // native coin
+    address: null, // native coin — CoinGecko lists no contract either
     decimals: 18,
-    coingeckoId: null,
-    priceUsd: 0, // pool-priced via WXP/USDX once seeded
+    coingeckoId: "xphere", // live USD price/24h/mcap/volume from CoinGecko
+    priceUsd: 0.0277, // seed until the first fetch resolves
     change24h: 0,
-    volume24h: 0,
-    marketCap: 0,
+    volume24h: 1_000_000,
+    marketCap: 77_000_000,
     color: "#7c3aed",
     logoUrl: "/tokens/XP.svg",
     logoTransparent: true,
