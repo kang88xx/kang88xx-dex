@@ -71,20 +71,28 @@ const RANGE_POINTS: Record<ChartRange, number> = {
  * Build a deterministic price series ending at the token's current price.
  * Walks backwards from the present using the 24h change to set drift.
  */
-export function getPriceHistory(symbol: string, range: ChartRange = "1M"): PricePoint[] {
+export function getPriceHistory(
+  symbol: string,
+  range: ChartRange = "1M",
+  // Live price override — for tokens with no CoinGecko feed (e.g. KANG) whose
+  // real price comes from the on-chain pool, not the static token seed.
+  currentPrice?: number,
+): PricePoint[] {
   const token = TOKEN_MAP[symbol];
   if (!token) return [];
+  const price =
+    currentPrice != null && currentPrice > 0 ? currentPrice : token.priceUsd;
   const points = RANGE_POINTS[range];
   const rand = mulberry32(hashSeed(symbol + range));
 
   // stablecoins barely move
-  const isStable = token.priceUsd > 0.95 && token.priceUsd < 1.05 && Math.abs(token.change24h) < 0.1;
+  const isStable = price > 0.95 && price < 1.05 && Math.abs(token.change24h) < 0.1;
   const vol = isStable ? 0.0008 : 0.045 + (hashSeed(symbol) % 30) / 1000;
   // overall drift so the series trends toward today's value
   const drift = (token.change24h / 100) * (range === "1D" ? 1 : range === "1W" ? 2.2 : range === "1M" ? 4 : 9);
 
   const series: number[] = [];
-  let p = token.priceUsd / (1 + drift);
+  let p = price / (1 + drift);
   for (let i = 0; i < points; i++) {
     const noise = (rand() - 0.5) * 2 * vol;
     const stepDrift = drift / points;
@@ -92,7 +100,7 @@ export function getPriceHistory(symbol: string, range: ChartRange = "1M"): Price
     series.push(p);
   }
   // pin the last point to the real current price
-  series[series.length - 1] = token.priceUsd;
+  series[series.length - 1] = price;
 
   return series.map((price, i) => ({
     t: i,

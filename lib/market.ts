@@ -99,6 +99,9 @@ export function usePriceHistory(
 ): { data: PricePoint[]; isLoading: boolean } {
   const token = TOKEN_MAP[symbol];
   const id = token?.coingeckoId ?? null;
+  // Live price for tokens without a CoinGecko feed (e.g. KANG, priced from its
+  // on-chain pool) so the synthetic series is anchored to the real price.
+  const livePrice = useMarket()[symbol]?.priceUsd;
 
   const { data, isLoading } = useQuery({
     queryKey: ["history", id, range],
@@ -108,6 +111,10 @@ export function usePriceHistory(
     refetchInterval: 5 * 60_000,
   });
 
-  if (!id) return { data: getPriceHistory(symbol, range), isLoading: false };
+  if (!id)
+    return {
+      data: getPriceHistory(symbol, range, livePrice),
+      isLoading: false,
+    };
   return { data: data ?? [], isLoading };
 }

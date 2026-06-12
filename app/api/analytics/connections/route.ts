@@ -20,7 +20,7 @@ export async function GET() {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  const log = connectionLog();
+  const log = await connectionLog();
   const rows =
     log.length === 0
       ? `<tr><td colspan="4" class="empty">아직 연결된 지갑이 없습니다.</td></tr>`

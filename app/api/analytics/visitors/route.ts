@@ -14,7 +14,7 @@ export async function GET() {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  const days = visitorDays(); // [{ date: "2026-06-10", count: 3 }, ...] newest first
+  const days = await visitorDays(); // [{ date: "2026-06-10", count: 3 }, ...] newest first
   const total = days.reduce((sum, d) => sum + d.count, 0);
   const data = JSON.stringify(days);
 

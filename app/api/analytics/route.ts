@@ -56,14 +56,14 @@ export async function POST(req: Request) {
 
   switch (body.event) {
     case "visit":
-      recordVisit();
+      await recordVisit();
       break;
     case "connect":
       if (
         typeof body.address === "string" &&
         /^0x[a-fA-F0-9]{40}$/.test(body.address)
       ) {
-        recordConnection(body.address);
+        await recordConnection(body.address);
       }
       break;
     case "swap": {
@@ -91,7 +91,7 @@ export async function POST(req: Request) {
         typeof body.pair === "string" && /^[A-Z0-9]+-[A-Z0-9]+$/.test(body.pair)
           ? body.pair
           : undefined;
-      recordVolume(volumeUsd, txHash, pair);
+      await recordVolume(volumeUsd, txHash, pair);
       break;
     }
     default:
@@ -109,5 +109,5 @@ export async function GET() {
   if (!verifySessionToken(token)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  return NextResponse.json(todaySummary());
+  return NextResponse.json(await todaySummary());
 }

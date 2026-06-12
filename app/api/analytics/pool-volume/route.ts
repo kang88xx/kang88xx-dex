@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 // { "BNB-USDT": 1234.5 }. Used by the Pools page to compute live Fee APR.
 // Aggregate, non-sensitive — safe to expose without admin auth.
 export async function GET() {
-  return NextResponse.json(volume24hByPair(), {
+  return NextResponse.json(await volume24hByPair(), {
     headers: { "cache-control": "no-store" },
   });
 }
