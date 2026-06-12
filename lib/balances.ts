@@ -8,14 +8,15 @@ import {
   useReadContracts,
 } from "wagmi";
 import { useTokenRegistry } from "./token-registry";
+import { NATIVE_SYMBOL } from "./chain";
 import type { Token } from "./types";
 
 const REFETCH_MS = 30_000;
 const EMPTY: Record<string, number> = {};
 
 /**
- * Real on-chain BSC balances for every registry token, keyed by symbol.
- * Native BNB via eth_getBalance, ERC-20s batched through multicall.
+ * Real on-chain balances for every registry token, keyed by symbol.
+ * Native XP via eth_getBalance, ERC-20s batched through multicall.
  * Returns {} while disconnected.
  */
 export function useBalances(): Record<string, number> {
@@ -50,7 +51,9 @@ export function useBalances(): Record<string, number> {
     if (!isConnected || !address) return EMPTY;
     const out: Record<string, number> = {};
     if (native.data) {
-      out.BNB = Number(formatUnits(native.data.value, native.data.decimals));
+      out[NATIVE_SYMBOL] = Number(
+        formatUnits(native.data.value, native.data.decimals),
+      );
     }
     erc20.data?.forEach((r, i) => {
       const t = erc20Tokens[i];

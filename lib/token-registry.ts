@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { TOKENS as BASE_TOKENS } from "./tokens";
+import { NATIVE_SYMBOL } from "./chain";
 import { useDexStore } from "./store";
 import type { AdminToken, Token } from "./types";
 
@@ -21,9 +22,9 @@ export function adminTokenToToken(a: AdminToken): Token {
   };
 }
 
-/** A token is swappable if it has a contract address or is native BNB. */
+/** A token is swappable if it has a contract address or is native XP. */
 export function tokenTradable(t: Token | undefined): boolean {
-  return !!t && (t.address !== null || t.symbol === "BNB");
+  return !!t && (t.address !== null || t.symbol === NATIVE_SYMBOL);
 }
 
 export interface TokenRegistry {

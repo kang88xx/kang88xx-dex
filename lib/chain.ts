@@ -1,62 +1,58 @@
-import { bsc, bscTestnet } from "@reown/appkit/networks";
-import type { AppKitNetwork } from "@reown/appkit/networks";
-
 // ------------------------------------------------------------------
-//  Single source of truth for which BNB chain the app runs on.
+//  Single source of truth for the chain the app runs on.
 //
-//  Flip the whole app (wallet network, router, WBNB, token registry)
-//  with one env var — no code change needed to go to production:
-//
-//    NEXT_PUBLIC_CHAIN_ENV=testnet   → BSC Testnet  (chainId 97)  [default]
-//    NEXT_PUBLIC_CHAIN_ENV=mainnet   → BSC Mainnet  (chainId 56)
-//
-//  We default to TESTNET while testing. When ready to run live on BSC,
-//  set NEXT_PUBLIC_CHAIN_ENV=mainnet in Vercel and redeploy.
+//  The DEX runs on XPHERE MAINNET (chainId 20250217) — a custom EVM
+//  chain with no viem/AppKit preset. The wallet network object lives in
+//  lib/reown.ts (AppKit defineChain); server code builds viem clients
+//  from XPHERE_VIEM below. Native coin is XP; WXP is our own WETH9
+//  wrapper deployed by dex-contracts alongside the Uniswap-V2-fork
+//  factory/router the swap + pools UIs talk to.
 // ------------------------------------------------------------------
+import type { Chain } from "viem";
 
-export const IS_TESTNET =
-  (process.env.NEXT_PUBLIC_CHAIN_ENV ?? "testnet") !== "mainnet";
+export const CHAIN_ID = 20250217;
+export const CHAIN_LABEL = "Xphere Mainnet";
 
-export const ACTIVE_CHAIN: AppKitNetwork = IS_TESTNET ? bscTestnet : bsc;
-export const CHAIN_ID = IS_TESTNET ? 97 : 56;
-export const CHAIN_LABEL = IS_TESTNET
-  ? "BNB Smart Chain Testnet"
-  : "BNB Smart Chain";
+/** Native coin symbol — what BNB was on the BSC build. */
+export const NATIVE_SYMBOL = "XP";
 
-// PancakeSwap V2 Router02 — different address per network.
-// Env override wins so you can point at a fork/your own router if needed.
-export const PANCAKE_ROUTER = (process.env.NEXT_PUBLIC_PANCAKE_ROUTER ??
-  (IS_TESTNET
-    ? "0xD99D1c33F9fC3444f8101754aBC46c52416550D1" // PancakeSwap V2 router (testnet)
-    : "0x10ED43C718714eb63d5aA57B78B54704E256024E")) as `0x${string}`;
+export const RPC_URL =
+  process.env.NEXT_PUBLIC_XPHERE_RPC ?? "https://xp-mainnet.rpc.xplorium.xyz";
+export const EXPLORER_URL =
+  process.env.NEXT_PUBLIC_XPHERE_EXPLORER ?? "https://xp.tamsa.io";
 
-// Wrapped BNB — used as the intermediate hop in router paths.
-export const WBNB = (process.env.NEXT_PUBLIC_WBNB ??
-  (IS_TESTNET
-    ? "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd" // WBNB (testnet)
-    : "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")) as `0x${string}`;
+/** Plain viem chain object — for server-side public/wallet clients. */
+export const XPHERE_VIEM: Chain = {
+  id: CHAIN_ID,
+  name: CHAIN_LABEL,
+  nativeCurrency: { name: "Xphere", symbol: NATIVE_SYMBOL, decimals: 18 },
+  rpcUrls: { default: { http: [RPC_URL] } },
+  blockExplorers: { default: { name: "Xplorium/TAMSA", url: EXPLORER_URL } },
+};
 
-// PancakeSwap V2 Factory — resolves a pair address from two token addresses
-// (getPair). Used to read live reserves for real pool TVL/APR.
-export const PANCAKE_FACTORY = (process.env.NEXT_PUBLIC_PANCAKE_FACTORY ??
-  (IS_TESTNET
-    ? "0x6725F303b657a9451d8BA641348b6761A6CC7a17" // PancakeSwap V2 factory (testnet)
-    : "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73")) as `0x${string}`;
+// Our Uniswap-V2-fork DEX (deployed by dex-contracts — `npm run deploy`
+// there prints all three). Swaps/pools stay disabled while these are
+// empty. Export names keep the Pancake-era spelling so the rest of the
+// app doesn't churn: ROUTER/FACTORY semantics are identical (Router02 ABI,
+// getPair/getReserves), only the fee differs (0.30% here vs 0.25%).
+export const PANCAKE_ROUTER = (process.env.NEXT_PUBLIC_DEX_ROUTER ??
+  "0x0000000000000000000000000000000000000000") as `0x${string}`;
 
-// MerkleAirdrop contract — deploy with `npm run deploy:airdrop`, then set the
-// resulting address here per network. Empty = not deployed yet (on-chain
-// claims disabled, admin shows "deploy first").
-export const AIRDROP_CONTRACT = ((IS_TESTNET
-  ? process.env.NEXT_PUBLIC_AIRDROP_TESTNET
-  : process.env.NEXT_PUBLIC_AIRDROP_MAINNET) ?? "") as
-  | `0x${string}`
-  | "";
+export const PANCAKE_FACTORY = (process.env.NEXT_PUBLIC_DEX_FACTORY ??
+  "0x0000000000000000000000000000000000000000") as `0x${string}`;
 
-// KangLMS (Last Man Standing game) contract — deploy with
-// `npm run deploy:lms`, then set the resulting address here per network.
-// Empty = not deployed yet (the /games page runs in local demo mode).
-export const LMS_CONTRACT = ((IS_TESTNET
-  ? process.env.NEXT_PUBLIC_LMS_TESTNET
-  : process.env.NEXT_PUBLIC_LMS_MAINNET) ?? "") as
+/** Wrapped native XP (WETH9) — the hop token in router paths. */
+export const WNATIVE = (process.env.NEXT_PUBLIC_WXP ??
+  "0x0000000000000000000000000000000000000000") as `0x${string}`;
+
+// MerkleAirdrop contract on Xphere — redeploy with `npm run deploy:airdrop`
+// (needs an Xphere variant), then set the address. Empty = on-chain claims
+// disabled (admin shows "deploy first").
+export const AIRDROP_CONTRACT = (process.env.NEXT_PUBLIC_AIRDROP_CONTRACT ??
+  "") as `0x${string}` | "";
+
+// KangLMS (Last Man Standing game) on Xphere — same deal. Empty = the
+// /games page runs in local demo mode.
+export const LMS_CONTRACT = (process.env.NEXT_PUBLIC_LMS_CONTRACT ?? "") as
   | `0x${string}`
   | "";

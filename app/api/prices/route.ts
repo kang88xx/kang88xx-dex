@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { formatUnits } from "viem";
 import { TOKENS } from "@/lib/tokens";
-import { PANCAKE_FACTORY } from "@/lib/chain";
+import { NATIVE_SYMBOL, PANCAKE_FACTORY, WNATIVE } from "@/lib/chain";
 import { serverRpc } from "@/lib/server-rpc";
 import { volume24hByPair } from "@/lib/analytics-store";
 import { recordPriceSnapshot, change24h } from "@/lib/price-history";
@@ -55,20 +55,25 @@ const ERC20_ABI = [
  * site's rolling swap volume for the pair (same source as the pools' Fee APR).
  */
 async function applyPoolPrices(out: Record<string, MarketData>): Promise<void> {
-  const usdt = TOKENS.find((t) => t.symbol === "USDT");
-  if (!usdt?.address) return;
-  const pUsdt = out.USDT?.priceUsd || 1;
+  const usdx = TOKENS.find((t) => t.symbol === "USDX");
+  if (!usdx?.address) return;
+  const pUsdx = out.USDX?.priceUsd || 1; // USDX is the $1 anchor
   const vol = await volume24hByPair();
   const rpc = serverRpc();
-  const usdtAddr = usdt.address as `0x${string}`;
+  const usdtAddr = usdx.address as `0x${string}`;
 
+  // Every non-anchor token, including native XP — XP trades as WXP in pairs.
   const targets = TOKENS.filter(
-    (t) => !t.coingeckoId && t.address && t.symbol !== "USDT",
+    (t) =>
+      !t.coingeckoId &&
+      t.symbol !== "USDX" &&
+      (t.address ||
+        (t.symbol === NATIVE_SYMBOL && WNATIVE !== ZERO_ADDR)),
   );
   await Promise.all(
     targets.map(async (t) => {
       try {
-        const tokenAddr = t.address as `0x${string}`;
+        const tokenAddr = (t.address ?? WNATIVE) as `0x${string}`;
         const pair = (await rpc.readContract({
           address: PANCAKE_FACTORY,
           abi: FACTORY_ABI,
@@ -88,19 +93,23 @@ async function applyPoolPrices(out: Record<string, MarketData>): Promise<void> {
         if (reserveToken === 0n || reserveUsdt === 0n) return;
 
         const rTok = Number(formatUnits(reserveToken, t.decimals));
-        const rUsd = Number(formatUnits(reserveUsdt, usdt.decimals));
-        const price = (rUsd / rTok) * pUsdt;
+        const rUsd = Number(formatUnits(reserveUsdt, usdx.decimals));
+        const price = (rUsd / rTok) * pUsdx;
 
         let marketCap = 0;
-        try {
-          const supply = (await rpc.readContract({
-            address: tokenAddr,
-            abi: ERC20_ABI,
-            functionName: "totalSupply",
-          })) as bigint;
-          marketCap = Number(formatUnits(supply, t.decimals)) * price;
-        } catch {
-          // no totalSupply → leave market cap at 0
+        if (t.address) {
+          // ERC-20 only — WXP's totalSupply is just the wrapped amount, not
+          // native XP's supply, so native XP keeps mcap 0.
+          try {
+            const supply = (await rpc.readContract({
+              address: tokenAddr,
+              abi: ERC20_ABI,
+              functionName: "totalSupply",
+            })) as bigint;
+            marketCap = Number(formatUnits(supply, t.decimals)) * price;
+          } catch {
+            // no totalSupply → leave market cap at 0
+          }
         }
 
         // Hourly snapshot + real 24h change (vs the listing price until a
@@ -108,7 +117,7 @@ async function applyPoolPrices(out: Record<string, MarketData>): Promise<void> {
         await recordPriceSnapshot(t.symbol, price);
         const change = await change24h(t.symbol, price);
 
-        const pairKey = [t.symbol, "USDT"].sort().join("-");
+        const pairKey = [t.symbol, "USDX"].sort().join("-");
         out[t.symbol] = {
           priceUsd: price,
           change24h: change,
@@ -154,7 +163,10 @@ function seedData(): Record<string, MarketData> {
 export async function GET() {
   const out = seedData();
 
+  // Xphere tokens have no CoinGecko listings today — this block only runs
+  // if a future token sets a coingeckoId.
   try {
+    if (!COINGECKO_IDS) throw new Error("no coingecko-listed tokens");
     const res = await fetch(
       `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${COINGECKO_IDS}&sparkline=true&price_change_percentage=24h`,
       { next: { revalidate: 60 } },
@@ -178,8 +190,8 @@ export async function GET() {
     // network/rate-limit failure → serve seed values, client retries in 60s
   }
 
-  // Pool-derived prices (KANG etc.) — runs after CoinGecko so USDT's USD
-  // price is available to convert pair reserves. Never blocks the response.
+  // Pool-derived prices (XP, KDG, …) quoted against the USDX anchor.
+  // Never blocks the response.
   try {
     await applyPoolPrices(out);
   } catch {

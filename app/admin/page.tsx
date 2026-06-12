@@ -555,7 +555,7 @@ function PoolsManager() {
   const { tradable } = useTokenRegistry();
   const symbols = tradable.map((t) => t.symbol);
 
-  const [token0, setToken0] = useState(symbols[0] ?? "BNB");
+  const [token0, setToken0] = useState(symbols[0] ?? "XP");
   const [token1, setToken1] = useState(symbols[1] ?? "USDT");
   const [feeTier, setFeeTier] = useState("0.25");
   // Delete goes through the password-gated confirm modal.
@@ -959,7 +959,7 @@ function SwapTokensManager() {
                     <Power className="h-4 w-4" />
                   </button>
                   {/* BNB stays: it's the gas token and the routing hop. */}
-                  {t.symbol !== "BNB" && (
+                  {t.symbol !== "XP" && (
                     <button
                       onClick={() => setDeleteTarget({ symbol: t.symbol, custom })}
                       title={custom ? "Remove custom token" : "취급 중단 (목록에서 제거)"}

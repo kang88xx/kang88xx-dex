@@ -562,7 +562,9 @@ export const useDexStore = create<DexState>()(
       //      abandoned v2 contract, so launched campaigns revert to drafts
       // v12: demo seed campaigns (genesis / early-supporter) removed — they
       //      respawned in every fresh browser after the admin deleted them
-      version: 12,
+      // v13: chain moved BSC → Xphere Mainnet — every persisted pool/token/
+      //      campaign/tx references retired BSC contracts, so wipe to seeds
+      version: 13,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) =>
         Object.fromEntries(
@@ -575,6 +577,18 @@ export const useDexStore = create<DexState>()(
         delete p.connected;
         delete p.address;
         delete p.balances;
+        // v12 → v13: BSC → Xphere. Pools, admin tokens, campaigns and tx
+        // history all point at BSC-era contracts — reset to fresh seeds.
+        if (version < 13) {
+          delete p.pools;
+          delete p.adminTokens;
+          delete p.removedTokens;
+          delete p.campaigns;
+          delete p.claims;
+          delete p.transactions;
+          delete p.lms;
+          return p as unknown as DexState;
+        }
         if (version < 10) {
           // reseed campaigns — old ones reference pre-BSC tokens/pools
           delete p.campaigns;

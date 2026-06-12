@@ -11,12 +11,14 @@ export { TOKENS, TOKEN_MAP, getToken } from "./tokens";
 //  This is the SEED for the admin-managed pool list (see lib/store.ts
 //  `pools`). Admins add/remove pools at runtime from /admin; the Pools
 //  page, add-liquidity modal, and campaign form read the store list.
-//  BNB/USDT below is the real PancakeSwap testnet pool we seeded
-//  (0.1 BNB : 60 USDT). PancakeSwap V2 fee tier is 0.25%.
+//  Xphere DEX (our Uniswap-V2 fork) fee tier is 0.30%. These pools start
+//  EMPTY on the new factory — seed them from /pools (first deposit sets
+//  the price; XP/USDX anchors every token's USD price).
 // ------------------------------------------------------------------
 
 export const POOLS: Pool[] = [
-  { id: "bnb-usdt", token0: "BNB", token1: "USDT", feeTier: 0.25, tvlUsd: 120, volume24h: 0, apr: 0 },
+  { id: "xp-usdx", token0: "XP", token1: "USDX", feeTier: 0.3, tvlUsd: 0, volume24h: 0, apr: 0 },
+  { id: "kdg-xp", token0: "KDG", token1: "XP", feeTier: 0.3, tvlUsd: 0, volume24h: 0, apr: 0 },
 ];
 
 export const POOL_MAP: Record<string, Pool> = Object.fromEntries(

@@ -1,8 +1,8 @@
 import { cookieStorage, createStorage } from "@wagmi/core";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
-import { opBNBTestnet } from "@reown/appkit/networks";
+import { defineChain } from "@reown/appkit/networks";
 import type { AppKitNetwork } from "@reown/appkit/networks";
-import { ACTIVE_CHAIN, IS_TESTNET } from "./chain";
+import { CHAIN_ID, CHAIN_LABEL, EXPLORER_URL, NATIVE_SYMBOL, RPC_URL } from "./chain";
 
 // Get one at https://dashboard.reown.com → set in .env.local
 export const projectId =
@@ -16,12 +16,25 @@ if (!projectId && typeof window !== "undefined") {
   );
 }
 
-// Active BNB chain (testnet or mainnet) — driven by NEXT_PUBLIC_CHAIN_ENV.
-// On testnet, opBNB Testnet rides along as the USDT bridge counterpart so
-// the wallet can switch chains on /bridge. Append more chains to expand.
-export const networks: [AppKitNetwork, ...AppKitNetwork[]] = IS_TESTNET
-  ? [ACTIVE_CHAIN, opBNBTestnet]
-  : [ACTIVE_CHAIN];
+// Xphere Mainnet — a custom EVM chain that AppKit/viem don't ship presets
+// for. AppKit's defineChain wraps a viem chain with the CAIP fields the
+// wallet modal needs. Values come from lib/chain.ts (single source).
+export const xphere = defineChain({
+  id: CHAIN_ID,
+  caipNetworkId: `eip155:${CHAIN_ID}`,
+  chainNamespace: "eip155",
+  name: CHAIN_LABEL,
+  nativeCurrency: { name: "Xphere", symbol: NATIVE_SYMBOL, decimals: 18 },
+  rpcUrls: { default: { http: [RPC_URL] } },
+  blockExplorers: {
+    default: { name: "Xplorium/TAMSA", url: EXPLORER_URL },
+  },
+});
+
+/** The wallet-facing network — Xphere only. */
+export const ACTIVE_CHAIN: AppKitNetwork = xphere;
+
+export const networks: [AppKitNetwork, ...AppKitNetwork[]] = [xphere];
 
 export const wagmiAdapter = new WagmiAdapter({
   storage: createStorage({ storage: cookieStorage }),

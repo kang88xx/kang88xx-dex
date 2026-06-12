@@ -10,8 +10,7 @@ import {
   WagmiProvider,
   type Config,
 } from "wagmi";
-import { projectId, wagmiAdapter, networks } from "@/lib/reown";
-import { ACTIVE_CHAIN } from "@/lib/chain";
+import { projectId, wagmiAdapter, networks, ACTIVE_CHAIN } from "@/lib/reown";
 import { useDexStore } from "@/lib/store";
 
 const queryClient = new QueryClient();

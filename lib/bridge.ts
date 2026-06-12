@@ -2,12 +2,11 @@
 // /api/bridge relayer route. Pure data + ABI (no hooks), so it is safe to
 // import from both client and server code.
 //
-// TESTNET ONLY for now: BSC Testnet (97) ↔ opBNB Testnet (5611), bridging
-// our TestToken USDT through a TestBridge lock/release contract on each
-// side (see contracts/TestBridge.sol). On mainnet the /bridge page keeps
-// its "coming soon" placeholder until a production bridge is wired up.
-
-import { IS_TESTNET } from "./chain";
+// RETIRED on Xphere: this lock/release bridge spans BSC Testnet (97) ↔
+// opBNB Testnet (5611) from the BSC era (contracts still live there).
+// On Xphere the /bridge page shows its "coming soon" placeholder until a
+// production bridge (e.g. XPBridge integration) is wired up — so
+// BRIDGE_ENABLED is hard false; the config below is kept for reference.
 
 export const BSC_TESTNET_ID = 97;
 export const OPBNB_TESTNET_ID = 5611;
@@ -60,13 +59,8 @@ export const BRIDGE_SIDES: Record<number, BridgeSide> = {
 /** The one supported route, in canonical order. */
 export const BRIDGE_CHAIN_IDS = [BSC_TESTNET_ID, OPBNB_TESTNET_ID] as const;
 
-/** Bridge is live only on testnet with every contract address configured. */
-export const BRIDGE_ENABLED =
-  IS_TESTNET &&
-  BRIDGE_CHAIN_IDS.every((id) => {
-    const s = BRIDGE_SIDES[id];
-    return !!s.usdt && !!s.bridge;
-  });
+/** Hard-disabled on Xphere — the BSC-era testnet bridge doesn't apply here. */
+export const BRIDGE_ENABLED = false;
 
 export const BRIDGE_TOKEN_SYMBOL = "USDT";
 export const BRIDGE_TOKEN_DECIMALS = 18;

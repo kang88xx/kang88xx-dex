@@ -13,7 +13,7 @@ import { useDexStore, useHydrated } from "@/lib/store";
 import { useBalances } from "@/lib/balances";
 import { useMarket } from "@/lib/market";
 import { formatNumber, formatUsd } from "@/lib/format";
-import { PANCAKE_ROUTER, CHAIN_ID } from "@/lib/chain";
+import { PANCAKE_ROUTER, CHAIN_ID, NATIVE_SYMBOL } from "@/lib/chain";
 import { applySlippage } from "@/lib/pancake";
 import {
   LIQUIDITY_ROUTER_ABI,
@@ -191,7 +191,7 @@ export function AddLiquidityModal({
   const supply = async () => {
     if (!wallet || !publicClient) return toast.error("지갑을 연결하세요");
     if (chainId !== CHAIN_ID)
-      return toast.error("지갑 네트워크를 BSC로 전환하세요");
+      return toast.error("지갑 네트워크를 Xphere로 전환하세요");
     if (n0 <= 0 || n1 <= 0) return toast.error("두 토큰 수량을 입력하세요");
     if (!enough) return toast.error("잔액이 부족합니다");
 
@@ -213,8 +213,8 @@ export function AddLiquidityModal({
         : amtB;
       const deadline = liquidityDeadline();
 
-      const aIsBnb = pool.token0 === "BNB";
-      const bIsBnb = pool.token1 === "BNB";
+      const aIsBnb = pool.token0 === NATIVE_SYMBOL;
+      const bIsBnb = pool.token1 === NATIVE_SYMBOL;
 
       if (!aIsBnb) await ensureAllowance(addrA, amtA, pool.token0);
       if (!bIsBnb) await ensureAllowance(addrB, amtB, pool.token1);

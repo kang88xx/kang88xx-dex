@@ -9,7 +9,7 @@ import { useAccount, useReadContracts } from "wagmi";
 import { TOKEN_MAP } from "./tokens";
 import { adminTokenToToken } from "./token-registry";
 import { useDexStore } from "./store";
-import { WBNB, PANCAKE_FACTORY, CHAIN_ID } from "./chain";
+import { WNATIVE, NATIVE_SYMBOL, PANCAKE_FACTORY, CHAIN_ID } from "./chain";
 import type { Pool, Token } from "./types";
 
 export const LIQUIDITY_ROUTER_ABI = [
@@ -152,12 +152,12 @@ export function useAllTokenMap(): Record<string, Token> {
   }, [adminTokens]);
 }
 
-/** Registry symbol → on-chain address (BNB trades as WBNB inside pairs). */
+/** Registry symbol → on-chain address (XP trades as WXP inside pairs). */
 export function liquidityTokenAddress(
   symbol: string,
   map: Record<string, Token>,
 ): `0x${string}` | null {
-  if (symbol === "BNB") return WBNB;
+  if (symbol === NATIVE_SYMBOL) return WNATIVE;
   return (map[symbol]?.address as `0x${string}` | null) ?? null;
 }
 

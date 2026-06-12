@@ -4,15 +4,15 @@ import { useMemo } from "react";
 import { formatUnits, parseUnits } from "viem";
 import { useReadContracts } from "wagmi";
 import { TOKEN_MAP } from "./tokens";
-import { PANCAKE_ROUTER, WBNB } from "./chain";
+import { NATIVE_SYMBOL, PANCAKE_ROUTER, WNATIVE } from "./chain";
 import { useTokenRegistry, tokenTradable } from "./token-registry";
 import type { Token } from "./types";
 
-// PancakeSwap V2 Router02 + WBNB — resolved per active network in lib/chain.ts.
-export { PANCAKE_ROUTER, WBNB };
+// Our Uniswap-V2-fork Router02 + WXP — resolved in lib/chain.ts.
+export { PANCAKE_ROUTER, WNATIVE };
 
-/** PancakeSwap V2 LP fee (0.25%) — shown in the swap details row */
-export const PANCAKE_FEE = 0.0025;
+/** Xphere DEX V2 LP fee (0.30% — the fork's UniswapV2Library uses mul(997)) */
+export const PANCAKE_FEE = 0.003;
 
 export const PANCAKE_ROUTER_ABI = [
   {
@@ -65,25 +65,25 @@ export const PANCAKE_ROUTER_ABI = [
   },
 ] as const;
 
-/** A token is swappable if it has a BSC contract or is native BNB. */
+/** A token is swappable if it has a contract or is native XP. */
 export function isTradable(symbol: string): boolean {
   return tokenTradable(TOKEN_MAP[symbol]);
 }
 
-/** Registry symbol → address used in router paths (BNB → WBNB). */
+/** Registry symbol → address used in router paths (XP → WXP). */
 function pathAddress(
   symbol: string,
   map: Record<string, Token>,
 ): `0x${string}` | null {
   const t = map[symbol];
   if (!t) return null;
-  if (t.symbol === "BNB") return WBNB;
+  if (t.symbol === NATIVE_SYMBOL) return WNATIVE;
   return t.address as `0x${string}` | null;
 }
 
 /**
  * Candidate router paths for a pair: the direct pair and (for token↔token)
- * the WBNB hop. The quote hook asks for both and keeps the better one.
+ * the WXP hop. The quote hook asks for both and keeps the better one.
  * `map` is the effective token registry (static + admin tokens).
  */
 export function buildPaths(
@@ -95,7 +95,7 @@ export function buildPaths(
   const b = pathAddress(toSymbol, map);
   if (!a || !b || a === b) return [];
   const paths: `0x${string}`[][] = [[a, b]];
-  if (a !== WBNB && b !== WBNB) paths.push([a, WBNB, b]);
+  if (a !== WNATIVE && b !== WNATIVE) paths.push([a, WNATIVE, b]);
   return paths;
 }
 

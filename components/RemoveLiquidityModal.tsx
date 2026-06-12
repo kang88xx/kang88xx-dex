@@ -9,7 +9,7 @@ import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import { useDexStore } from "@/lib/store";
 import { useMarket } from "@/lib/market";
 import { formatNumber, formatUsd } from "@/lib/format";
-import { PANCAKE_ROUTER, CHAIN_ID } from "@/lib/chain";
+import { PANCAKE_ROUTER, CHAIN_ID, NATIVE_SYMBOL } from "@/lib/chain";
 import { applySlippage } from "@/lib/pancake";
 import {
   LIQUIDITY_ROUTER_ABI,
@@ -67,7 +67,7 @@ export function RemoveLiquidityModal({
   const remove = async () => {
     if (!wallet || !publicClient) return toast.error("지갑을 연결하세요");
     if (chainId !== CHAIN_ID)
-      return toast.error("지갑 네트워크를 BSC로 전환하세요");
+      return toast.error("지갑 네트워크를 Xphere로 전환하세요");
     if (!pairAddress || lpToBurn <= 0n)
       return toast.error("출금할 유동성이 없습니다");
 
@@ -104,8 +104,8 @@ export function RemoveLiquidityModal({
       const minA = applySlippage(outA, SLIPPAGE_PCT);
       const minB = applySlippage(outB, SLIPPAGE_PCT);
       const deadline = liquidityDeadline();
-      const aIsBnb = pool.token0 === "BNB";
-      const bIsBnb = pool.token1 === "BNB";
+      const aIsBnb = pool.token0 === NATIVE_SYMBOL;
+      const bIsBnb = pool.token1 === NATIVE_SYMBOL;
 
       toast.info("유동성 출금 트랜잭션 전송 중… 지갑에서 확인하세요");
       let hash: `0x${string}`;

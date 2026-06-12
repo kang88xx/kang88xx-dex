@@ -18,7 +18,7 @@ export function MarketSection({
   /** Called when a token row is clicked — overrides the local selection. */
   onTokenSelect?: (symbol: string) => void;
 } = {}) {
-  const [localSelected, setLocalSelected] = useState("BNB");
+  const [localSelected, setLocalSelected] = useState("XP");
   const selected = chartSymbol ?? localSelected;
   const select = (symbol: string) => {
     if (onTokenSelect) onTokenSelect(symbol);

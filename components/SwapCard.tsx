@@ -25,7 +25,7 @@ import {
   swapDeadline,
   useSwapQuote,
 } from "@/lib/pancake";
-import { CHAIN_ID, CHAIN_LABEL } from "@/lib/chain";
+import { CHAIN_ID, CHAIN_LABEL, NATIVE_SYMBOL } from "@/lib/chain";
 import { formatNumber, formatUsd } from "@/lib/format";
 import { TokenLogo } from "./TokenLogo";
 import { TokenSelectModal } from "./TokenSelectModal";
@@ -33,8 +33,8 @@ import { toast } from "./toast";
 import { ArrowChip } from "./ui";
 
 const BSC_CHAIN_ID = CHAIN_ID;
-// Keep a little BNB aside for gas when pressing MAX
-const BNB_GAS_RESERVE = 0.005;
+// Keep a little XP aside for gas when pressing MAX
+const GAS_RESERVE = 0.005;
 
 export interface SwapPair {
   from: string;
@@ -62,8 +62,8 @@ export function SwapCard({
   const publicClient = usePublicClient();
 
   const [localPair, setLocalPair] = useState<SwapPair>({
-    from: "BNB",
-    to: "USDT",
+    from: NATIVE_SYMBOL,
+    to: "USDX",
   });
   const { from, to } = pair ?? localPair;
   const setPair = (next: SwapPair) => {
@@ -84,7 +84,7 @@ export function SwapCard({
 
   const { map: tokenMap } = useTokenRegistry();
   const fromToken = tokenMap[from];
-  const isFromNative = from === "BNB";
+  const isFromNative = from === NATIVE_SYMBOL;
   const fromBal = useBalance(from);
   const pFrom = market[from]?.priceUsd ?? 0;
   const pTo = market[to]?.priceUsd ?? 0;
@@ -112,7 +112,7 @@ export function SwapCard({
       ? to
       : null;
 
-  // Router allowance for ERC-20 inputs (native BNB needs none)
+  // Router allowance for ERC-20 inputs (native XP needs none)
   const { data: allowance } = useReadContract({
     address: (fromToken?.address ?? undefined) as `0x${string}` | undefined,
     abi: erc20Abi,
@@ -157,7 +157,7 @@ export function SwapCard({
 
   const setMax = () => {
     const max = isFromNative
-      ? Math.max(0, fromBal - BNB_GAS_RESERVE)
+      ? Math.max(0, fromBal - GAS_RESERVE)
       : fromBal;
     setAmount(String(Number(max.toFixed(6))));
   };
@@ -189,7 +189,7 @@ export function SwapCard({
     // closure's `pendingAction`, so track the failing step ourselves.
     let stage: "approve" | "swap" = "swap";
     try {
-      // Step 1 — approve the ERC-20 input for the router (native BNB needs none).
+      // Step 1 — approve the ERC-20 input for the router (native XP needs none).
       if (needsApproval && fromToken?.address) {
         stage = "approve";
         setPendingAction("approve");
@@ -222,7 +222,7 @@ export function SwapCard({
           value: quote.amountInWei,
           chainId: BSC_CHAIN_ID,
         });
-      } else if (to === "BNB") {
+      } else if (to === NATIVE_SYMBOL) {
         hash = await writeContractAsync({
           address: PANCAKE_ROUTER,
           abi: PANCAKE_ROUTER_ABI,
@@ -435,7 +435,7 @@ export function SwapCard({
           </Row>
           {quote.path.length === 3 && (
             <Row label="Route">
-              {from} → BNB → {to}
+              {from} → XP → {to}
             </Row>
           )}
         </div>
